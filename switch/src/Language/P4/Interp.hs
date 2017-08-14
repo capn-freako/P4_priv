@@ -18,13 +18,7 @@
 -- Behavioral modeling of P4-programmable switches.
 ----------------------------------------------------------------------
 
-module Language.P4.Interp
-  ( P4Interp (..)
-  , P4Script (..)
-  , mkInterp
-  , Pkt
-  , SwitchState (..)
-  ) where
+module Language.P4.Interp where
 
 import Control.Lens
 import Control.Monad.State
@@ -62,7 +56,7 @@ type Switch = [Pkt] -> SwitchState -> ([Pkt], SwitchState)
 data SwitchState = SwitchState
   { pktsLost    :: Integer
   , pktsDropped :: Integer
-  }
+  } deriving (Show)
 
 -- | Match/action table abstraction.
 --
@@ -120,11 +114,19 @@ data Value    = Addr  Integer
               | Etype EthType
               | VBool Bool
               | VInt  Int
-  deriving (Show, Eq, Ord)
+  deriving (Eq, Ord)
 
 data EthType  = IP
               | NMB
   deriving (Show, Eq, Ord)
+
+instance Show Value where
+  show v =
+    case v of
+      Addr n   -> show n
+      Etype et -> show et
+      VBool q  -> show q
+      VInt n   -> show n
 
 -- | Value accessors.
 --
@@ -196,6 +198,18 @@ data Pkt = Pkt
 
 -- This TH splice builds lenses for all fields in *Pkt* automatically.
 $(makeLenses ''Pkt)
+
+instance Show Pkt where
+  show p =
+    "Packet:\n" ++
+    "\tIn port:\t\t"            ++ show (_inPort p)   ++ "\n" ++
+    "\tOut port:\t\t"           ++ show (_outPort p)  ++ "\n" ++
+    "\tVLAN ID:\t\t"            ++ show (_vlanId p)   ++ "\n" ++
+    "\tDropped:\t\t"            ++ show (_dropped p)  ++ "\n" ++
+    "\tSource MAC Addr:\t"      ++ show (_srcAddr p)  ++ "\n" ++
+    "\tDestination MAC Addr:\t" ++ show (_dstAddr p)  ++ "\n" ++
+    "\tEthernet type:\t\t"      ++ show (_eType p)    ++ "\n" ++
+    "\tPayload size:\t\t"       ++ show (_pyldSize p) ++ "\n"
 
 hdrFields = [FsrcAddr, FdstAddr, FeType]  -- Which fields to match on.
 
