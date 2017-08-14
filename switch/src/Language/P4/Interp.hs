@@ -54,9 +54,14 @@ newtype P4Interp = P4Interp { runP4 :: Switch }
 -- to output packet stream + final switch state.
 type Switch = [Pkt] -> SwitchState -> ([Pkt], SwitchState)
 data SwitchState = SwitchState
-  { pktsLost    :: Integer
-  , pktsDropped :: Integer
-  } deriving (Show)
+  { _pktsLost    :: Integer
+  , _pktsDropped :: Integer
+  }
+
+instance Show SwitchState where
+  show ss =
+    "Packets lost:\t\t"  ++ show (_pktsLost ss)    ++ "\n" ++
+    "Packets dropped:\t" ++ show (_pktsDropped ss) ++ "\n"
 
 -- | Match/action table abstraction.
 --
@@ -166,6 +171,7 @@ getVInt val = case val of
 data Action = Noop
             | Drop
             | Modify Field Value
+  deriving (Eq)
 
 -- | Packet abstraction.
 --
@@ -198,6 +204,7 @@ data Pkt = Pkt
 
 -- This TH splice builds lenses for all fields in *Pkt* automatically.
 $(makeLenses ''Pkt)
+$(makeLenses ''SwitchState)
 
 instance Show Pkt where
   show p =
@@ -263,11 +270,14 @@ evalExpr _ = True
 --
 -- TODO: Incorporate the switch state into this processing.
 applyTbl :: Table -> [Action] -> [Action] -> Unop (Pkt, SwitchState)
-applyTbl tbl hit miss (pkt, st) = let pkt' = foldl (.) id (map actionToFunc (mActions ++ extras)) pkt
-                                 in (pkt', st)
+applyTbl tbl hit miss (pkt, st) = let pkt' = foldl (.) id (map actionToFunc allActions) pkt
+                                      st'  = if Drop `elem` allActions then over pktsDropped (+ 1) $ st
+                                                                  else st
+                                  in  (pkt', st')
   where extras | matched    = hit
                | otherwise  = miss
         (mActions, matched) = match tbl pkt
+        allActions          = mActions ++ extras
 
 -- | Attempt to match a packet, using a single table.
 match :: Table -> Pkt -> ([Action], Bool)

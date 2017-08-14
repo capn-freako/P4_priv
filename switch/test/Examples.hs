@@ -34,8 +34,8 @@ testP4 nm rprt dut pkts st = rprt nm $ runP4 dut pkts st
 
 -- Initial switch states.
 initState = SwitchState
-  { pktsLost    = 0
-  , pktsDropped = 0
+  { _pktsLost    = 0
+  , _pktsDropped = 0
   }
 
 -- Reports.
