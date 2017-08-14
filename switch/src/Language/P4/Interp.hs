@@ -3,6 +3,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 {-# OPTIONS_GHC -Wall #-}
+{-# OPTIONS_GHC -Wno-missing-signatures #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 ----------------------------------------------------------------------
 -- |
@@ -16,7 +18,13 @@
 -- Behavioral modeling of P4-programmable switches.
 ----------------------------------------------------------------------
 
-module Language.P4.Interp where
+module Language.P4.Interp
+  ( P4Interp (..)
+  , P4Script (..)
+  , mkInterp
+  , Pkt
+  , SwitchState (..)
+  ) where
 
 import Control.Lens
 import Control.Monad.State
