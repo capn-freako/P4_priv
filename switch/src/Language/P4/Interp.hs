@@ -95,7 +95,7 @@ allFieldsMatch mp pkt = and $ concat [
   [matchVal (mp Map.! fld) (acc (header pkt)) | (fld, acc) <- zip [FsrcAddr, FdstAddr, FeType]  [srcAddr, dstAddr, eType]] ]
 
 matchVal :: Match -> Value -> Bool
-matchVal m v = case m of
+matchVal mtch v = case mtch of
   Exact val   -> case val of
     Addr n | Addr m <- v -> m == n
            | otherwise   -> False
@@ -159,18 +159,18 @@ mkOp stmt = case stmt of
 
 -- | Evaluate an Boolean expression.
 evalExpr :: Expr -> Bool
-evalExpr e = True
+evalExpr _ = True
 
 -- | Process a single packet, via a single table.
 --
 -- TODO: Incorporate the switch state into this processing.
 -- procPkt :: Table -> [Statement] -> [Statement] -> (Pkt, SwitchState) -> (Pkt, SwitchState)
 procPkt :: Table -> [Action] -> [Action] -> Unop (Pkt, SwitchState)
-procPkt tbl hit miss (pkt, st) = let pkt' = applyActions (actions ++ extras) pkt
+procPkt tbl hit miss (pkt, st) = let pkt' = applyActions (mActions ++ extras) pkt
                                  in (pkt', st)
   where extras | matched == True = hit
                | otherwise      = miss
-        (actions, matched)      = match tbl pkt
+        (mActions, matched)      = match tbl pkt
 
 applyActions :: [Action] -> Pkt -> Pkt
 applyActions _ = id
@@ -219,6 +219,6 @@ type Expr = Bool
 type Unop a = a -> a
 
 safeHead :: [a] -> Maybe a
-safeHead []     = Nothing
-safeHead (x:xs) = Just x
+safeHead []    = Nothing
+safeHead (x:_) = Just x
 
