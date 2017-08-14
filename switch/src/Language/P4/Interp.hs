@@ -21,7 +21,6 @@ module Language.P4.Interp where
 import Control.Lens
 import Control.Monad.State
 import Data.Bits
--- import Data.Lens.Common
 import Data.List
 import qualified Data.Map.Strict as Map
 
@@ -51,9 +50,10 @@ newtype P4Interp = P4Interp { runP4 :: Switch }
 --
 -- Input packet stream + initial switch state and pre-configured match/action tables,
 -- to output packet stream + final switch state.
-type Switch = [Table] -> SwitchState -> [Pkt] -> ([Pkt], SwitchState)
+type Switch = [Pkt] -> SwitchState -> ([Pkt], SwitchState)
 data SwitchState = SwitchState
-  { pktsLost :: Integer
+  { pktsLost    :: Integer
+  , pktsDropped :: Integer
   }
 
 -- | Match/action table abstraction.
@@ -214,42 +214,34 @@ fieldToLens fld = case fld of
 
 -- | Converts a P4 script into a behavioral model of a programmed switch.
 mkInterp :: P4Script -> P4Interp
-mkInterp = undefined
--- sequence :: [m a] -> m [a]
--- stmts               :: [Statement]
--- traverse            :: (a -> f b) -> t a -> f (t b)
--- traverse mkOp       :: t Statement -> State SwitchState (t (Unop Pkt))
--- traverse mkOp stmts :: State SwitchState [Unop Pkt] = StateT SwitchState [Unop Pkt] Identity
--- runState (traverse mkOp stmts) :: SwitchState -> ([Unop Pkt], SwitchState)
---
--- wanted :: SwitchState -> [Pkt] -> ([Pkt], SwitchState)
---
--- try for :: SwitchState -> Pkt -> (Pkt, SwitchState)
--- if f :: Pkt -> SwitchState -> (Pkt, SwitchState) = Pkt -> runState (State SwitchState Pkt)
--- then (flip f) has the type we want.
--- mkInterp script = P4Interp $ \ tbls -> runState (traverse (foldM mkOp [] stmts))
---   where stmts | egress script == Just outStmts = inStmts ++ outStmts
---               | otherwise                     = inStmts
---         inStmts = ingress script
---   where procSteps | egress script == Just outScript = inProc ++ fmap mkOp outScript
---                   | otherwise                      = inProc
---         inProc = fmap mkOp $ ingress script
+mkInterp script = P4Interp $ \pkts -> runState (traverse (procPkt stmts) pkts)
+  where stmts | Just outStmts <- egress script = inStmts ++ outStmts
+              | otherwise                      = inStmts
+        inStmts = ingress script
 
-mkOp :: Statement -> [Unop (Pkt, SwitchState)]
-mkOp stmt = case stmt of
-  Apply tbl hit miss -> [procPkt tbl hit miss]
-  If e s1 s2         -> if evalExpr e then mkOp s1 else mkOp s2
-  User stmts         -> concatMap mkOp stmts
+procPkt :: [Statement] -> Pkt -> State SwitchState Pkt
+procPkt stmts pkt = foldl (>>=) (return pkt) (map app $ concatMap mkOps stmts)
+  where app f = \p ->
+          do s <- get
+             let (p', s') = f (p, s)
+             put s'
+             return p'
+
+mkOps :: Statement -> [Unop (Pkt, SwitchState)]
+mkOps stmt = case stmt of
+  Apply tbl hit miss -> [applyTbl tbl hit miss]
+  If e s1 s2         -> if evalExpr e then mkOps s1 else mkOps s2
+  User stmts         -> concatMap mkOps stmts
 
 -- | Evaluate an Boolean expression.
 evalExpr :: Expr -> Bool
 evalExpr _ = True
 
--- | Process a single packet, via a single table.
+-- | Apply a single table to a packet.
 --
 -- TODO: Incorporate the switch state into this processing.
-procPkt :: Table -> [Action] -> [Action] -> Unop (Pkt, SwitchState)
-procPkt tbl hit miss (pkt, st) = let pkt' = foldl (.) id (map actionToFunc (mActions ++ extras)) pkt
+applyTbl :: Table -> [Action] -> [Action] -> Unop (Pkt, SwitchState)
+applyTbl tbl hit miss (pkt, st) = let pkt' = foldl (.) id (map actionToFunc (mActions ++ extras)) pkt
                                  in (pkt', st)
   where extras | matched    = hit
                | otherwise  = miss
