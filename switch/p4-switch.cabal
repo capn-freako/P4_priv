@@ -24,6 +24,7 @@ library
   build-depends:       base >= 4.7 && < 5
                      , mtl
                      , containers
+                     -- , data-lens
   default-language:    Haskell2010
 
 test-suite switch-examples
@@ -33,5 +34,6 @@ test-suite switch-examples
   build-depends:       base
                      , mtl
                      , containers
+                     -- , data-lens
   default-language:    Haskell2010
 

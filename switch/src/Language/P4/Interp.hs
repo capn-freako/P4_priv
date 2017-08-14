@@ -1,3 +1,7 @@
+{-# LANGUAGE RankNTypes #-}
+
+{-# LANGUAGE TemplateHaskell #-}
+
 {-# OPTIONS_GHC -Wall #-}
 
 ----------------------------------------------------------------------
@@ -17,6 +21,7 @@ module Language.P4.Interp where
 import Control.Lens
 import Control.Monad.State
 import Data.Bits
+-- import Data.Lens.Common
 import Data.List
 import qualified Data.Map.Strict as Map
 
@@ -109,53 +114,87 @@ data Value    = Addr  Integer
               | VInt  Int
   deriving (Show, Eq, Ord)
 
-getVal :: Value -> a
-getVal v = case v of
-  Addr  n  -> n
-  Etype et -> et
-  VBool q  -> q
-  VInt  n  -> n
-
 data EthType  = IP
               | NMB
   deriving (Show, Eq, Ord)
 
+-- | Value accessors.
+--
+-- TODO: This approach is reminiscent of the *Visitor* class, used to
+--       implement polymorphic recursion in C++/Boost. It seems like
+--       Haskell, with its accomodation of existential type
+--       quantification, ought to be able to do this in a more elegant
+--       fashion, but I lack experience in its use. Talk to Conal.
+--       (See, also, *Packet abstraction*, below.)
+getAddr :: Value -> Maybe Integer
+getAddr val = case val of
+  Addr n -> Just n
+  _      -> Nothing
+
+getEtype :: Value -> Maybe EthType
+getEtype val = case val of
+  Etype et -> Just et
+  _        -> Nothing
+
+getVBool :: Value -> Maybe Bool
+getVBool val = case val of
+  VBool q -> Just q
+  _       -> Nothing
+
+getVInt :: Value -> Maybe Int
+getVInt val = case val of
+  VInt n -> Just n
+  _      -> Nothing
+
+-- | Actions
+--
+-- TODO: Understand why this had to be moved above the *Pkt* definition,
+--       when I introduced lenses and their associated TH splice, below.
+--       (Moving the code back to its original location, below the TH
+--       splice, yields and "undefined constructor: Action" error, at
+--       line 74.)
+data Action = Noop
+            | Drop
+            | Modify Field Value
+
 -- | Packet abstraction.
+--
+-- Note: The "_" prefix in the field names is required by *Control.Lens*,
+--       to make the Template Haskell splice, below, work.
 --
 -- TODO: Talk to Conal about my choice of making everything a *Value*.
 --       I did this, in order to avoid introducing existential type
---       quantification, in my fieldToPktAcc function, below. But, I
---       need to make sure I'm thinking about this correctly.
+--       quantification, in my *fieldToLens* function, below. But, I
+--       need to make sure I'm thinking about this correctly. Maybe,
+--       review the potential use cases and caveats of existential
+--       types, in Haskell.
+--
+-- TODO: There's an awkward 1:1 correspondence between the fields of
+--       the *Pkt* type and the value constructors of the *Field* type.
+--       Can anything be done to make this more elegant?
 data Pkt = Pkt
   { -- meta-data
-    inPort  :: Value
-  , outPort :: Value
-  , vlanId  :: Value
-  , dropped :: Value
+    _inPort  :: Value
+  , _outPort :: Value
+  , _vlanId  :: Value
+  , _dropped :: Value
     -- header
-  , srcAddr :: Value
-  , dstAddr :: Value
-  , eType   :: Value
+  , _srcAddr :: Value
+  , _dstAddr :: Value
+  , _eType   :: Value
     -- payload
-  , pyldSize :: Value     -- For now, just note the size of the payload.
+  , _pyldSize :: Value     -- For now, just note the size of the payload.
   }
-hdrFields = [FsrcAddr, FdstAddr, FeType]
 
--- | Field matching
---
--- TODO: Will Haskell let us map over all possible value constructors for a type?
---       This manual matching of the function code, below, to the data structures,
---       above, seems clunky and inelegant.
-{-
-allFieldsMatch :: Map.Map Field Match -> Pkt -> Bool
-allFieldsMatch mp pkt = and $ concat [
-  [matchVal (mp Map.! fld) (acc (meta   pkt)) | (fld, acc) <- zip [FinPort,  FoutPort, FvlanId] [inPort,  outPort, vlanId]],
-  [matchVal (mp Map.! fld) (acc (header pkt)) | (fld, acc) <- zip [FsrcAddr, FdstAddr, FeType]  [srcAddr, dstAddr, eType]] ]
--}
+-- This TH splice builds lenses for all fields in *Pkt* automatically.
+$(makeLenses ''Pkt)
 
+hdrFields = [FsrcAddr, FdstAddr, FeType]  -- Which fields to match on.
+
+-- | Row matching
 rowMatch :: Pkt -> TableRow -> Bool
 rowMatch pkt row = and
-  [matchVal (fields row Map.! fld) (acc pkt) | (fld, acc) <- zip hdrFields $ map fieldToPktAcc hdrFields]
+  [matchVal (fields row Map.! fld) (acc pkt) | (fld, acc) <- zip hdrFields $ map (view . fieldToLens) hdrFields]
 
 matchVal :: Match -> Value -> Bool
 matchVal mtch v = case mtch of
@@ -164,8 +203,8 @@ matchVal mtch v = case mtch of
   Ternary n m | Addr n' <- v -> (n' .&. m) == (n .&. m)
               | otherwise    -> False  -- error?
 
-fieldToPktAcc :: Field -> Pkt -> Value
-fieldToPktAcc fld = case fld of
+fieldToLens :: Field -> Lens' Pkt Value
+fieldToLens fld = case fld of
   FinPort  -> inPort
   FoutPort -> outPort
   FvlanId  -> vlanId
@@ -197,13 +236,10 @@ mkInterp = undefined
 --         inProc = fmap mkOp $ ingress script
 
 mkOp :: Statement -> [Unop (Pkt, SwitchState)]
--- mkOp :: Statement -> State SwitchState (Unop Pkt)
 mkOp stmt = case stmt of
   Apply tbl hit miss -> [procPkt tbl hit miss]
-
-  If e s1 s2         -> if evalExpr e == True then mkOp s1 else mkOp s2
-
-  User stmts         -> concat $ map mkOp stmts
+  If e s1 s2         -> if evalExpr e then mkOp s1 else mkOp s2
+  User stmts         -> concatMap mkOp stmts
 
 -- | Evaluate an Boolean expression.
 evalExpr :: Expr -> Bool
@@ -215,9 +251,9 @@ evalExpr _ = True
 procPkt :: Table -> [Action] -> [Action] -> Unop (Pkt, SwitchState)
 procPkt tbl hit miss (pkt, st) = let pkt' = foldl (.) id (map actionToFunc (mActions ++ extras)) pkt
                                  in (pkt', st)
-  where extras | matched == True = hit
-               | otherwise      = miss
-        (mActions, matched)     = match tbl pkt
+  where extras | matched    = hit
+               | otherwise  = miss
+        (mActions, matched) = match tbl pkt
 
 -- | Attempt to match a packet, using a single table.
 match :: Table -> Pkt -> ([Action], Bool)
@@ -226,25 +262,21 @@ match tbl pkt | Just row <- safeHead (sort matchingRows) = (actions row, True)
   where matchingRows = filter (rowMatch pkt) $ rows tbl
 
 -- | P4 scripting abstraction.
-data P4Script = P4Script { ingress :: [Statement]        -- Must exist; P4 programs start here. ("main()" equiv.)
-                         , egress  :: Maybe [Statement]  -- Optional.
-                         }
+data P4Script = P4Script
+  { ingress :: [Statement]        -- Must exist; P4 programs start here. ("main()" equiv.)
+  , egress  :: Maybe [Statement]  -- Optional.
+  }
 
 -- | Control flow abstraction.
 data Statement = Apply Table       [Action]    [Action]  -- optional hit/miss processing
                | If    Expr        Statement   Statement
                | User  [Statement]                       -- Just allows for modular code writing.
 
--- | Actions
-data Action = Noop
-            | Drop
-            | Modify Field Value
-
 actionToFunc :: Action -> Unop Pkt
 actionToFunc a = case a of
   Noop           -> id
-  Drop           -> set dropped True
-  Modify fld val -> set (fieldToPktAcc fld) (getVal val)
+  Drop           -> set dropped $ VBool True
+  Modify fld val -> set (fieldToLens fld) val
 
 -- | Result
 data MatchResult = Hit
