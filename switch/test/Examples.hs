@@ -47,9 +47,9 @@ simpleRprt nm res =
   let outPkts = fst res
   in do putStrLn $ "Testing " ++ nm ++ "..."
         putStrLn $ "Output packets (" ++ show (length outPkts) ++ "):"
-        _ <- sequence $ map (putStrLn . show) (fst res)
-        putStrLn $ "Final switch state:"
-        putStrLn $ show (snd res)
+        _ <- mapM print (fst res)
+        putStrLn "Final switch state:"
+        print (snd res)
 
 -- P4 Scripts.
 dummyScript = P4Script
@@ -69,7 +69,8 @@ tblDropNMB = Table
   { tableID = 0
   , rows =
       [ TableRow
-          { fields = Map.fromList
+          { rowID  = 0
+          , fields = Map.fromList
                        [ (FeType,   Exact $ Etype NMB)
                        , (FsrcAddr, NoMatch)
                        , (FdstAddr, NoMatch)

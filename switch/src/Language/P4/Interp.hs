@@ -23,23 +23,25 @@ module Language.P4.Interp where
 import Control.Lens
 import Control.Monad.State
 import Data.Bits
+import Data.Function (on)
 import Data.List
-import qualified Data.Map.Strict as Map
+import Data.Map.Strict ((!), keys, Map)
 
 -- | Behavioral P4 interpreter.
 --
--- Should return its match/action table depth, after construction.
---
 -- Note: Parser modeling has been omitted. Therefore, test packet data
 --       fields must coincide with table reads definition fields.
---       A helper function, mkPkt(), has been provided, to facillitate
---       this.
+--       (See *test/Examples.hs*, for packet construction guidance.)
 --
 -- Note: We're modeling only the data plane, here; not the control
 --       plane. Therefore, tables are static, read-only entities, in
---       this context, and must be passed into the *runP4* function.
+--       this context.
 --       There is no provision in this module for creating tables, nor
---       for inserting/deleting rows to/from them.
+--       for inserting/deleting rows to/from them. Instead, tables are
+--       expected to be created by the testing infrastructure, and enter
+--       the simulation flow, only by virtue of the *Apply* constructor
+--       for the *Statement* type.
+--       (See *test/Examples.hs*, for table construction guidance.)
 --
 -- Note: The *P4Interp* data structure should *not* be constructed
 --       manually by the user. Instead, the *mkInterp()* helper function
@@ -49,9 +51,6 @@ import qualified Data.Map.Strict as Map
 newtype P4Interp = P4Interp { runP4 :: Switch }
 
 -- | Type definition of a configured switch.
---
--- Input packet stream + initial switch state and pre-configured match/action tables,
--- to output packet stream + final switch state.
 type Switch = [Pkt] -> SwitchState -> ([Pkt], SwitchState)
 data SwitchState = SwitchState
   { _pktsLost    :: Integer
@@ -59,40 +58,39 @@ data SwitchState = SwitchState
   }
 
 instance Show SwitchState where
-  show ss =
-    "Packets lost:\t\t"  ++ show (_pktsLost ss)    ++ "\n" ++
-    "Packets dropped:\t" ++ show (_pktsDropped ss) ++ "\n"
+  show ss = unlines
+    [ "Packets lost:\t\t" ++ show (_pktsLost ss)
+    , "Packets dropped:\t" ++ show (_pktsDropped ss)
+    ]
 
 -- | Match/action table abstraction.
---
--- TODO: The *Ord* instance needs work. Because table (i.e. - Map)
---       construction sorts the keys as they're inserted, we can't use
---       insertion order to indicate priority. And, what really needs
---       to happen is that exact matches take priority over ternary
---       matches.
 data Table = Table
   { tableID :: Int
   , rows    :: [TableRow]
   }
 
 data TableRow = TableRow
-  { fields  :: Map.Map Field Match
-  , params  :: Map.Map Param Value
+  { rowID   :: Int
+  , fields  :: Map Field Match
+  , params  :: Map Param Value
   , actions :: [Action]
   }
 
 instance Eq TableRow where
-  rx == ry = fields rx == fields ry
+  (==) = (==) `on` fields
 
+-- | Table row *Ord* instance.
+--
+-- This works, because it relies on the derived *Ord* instance for
+-- *Match*, and derived *Ord* instances for sum types assume that the
+-- constructors are given in ascending order. That is, we are able to
+-- express our preference for exact matches, simply by listing the
+-- *Exact* constructor before the *Ternary* constructor in the
+-- definition of the *Match* data type, below.
 instance Ord TableRow where
-  rx <= ry = if xType == yType then x' <= y' else xType <= yType
-    where xType = x Map.! fld
-          yType = y Map.! fld
-          x'    = Map.delete fld x
-          y'    = Map.delete fld y
-          fld   = head $ Map.keys x
-          x     = fields rx
-          y     = fields ry
+  compare rx ry = foldl mappend EQ [compare (x!k) (y!k) | k <- keys x]
+    where x = fields rx
+          y = fields ry
 
 data Field    = FinPort
               | FoutPort
@@ -125,41 +123,30 @@ data EthType  = IP
               | NMB
   deriving (Show, Eq, Ord)
 
+-- TODO: Can TH be used to eliminate this? We just want to avoid
+--       printing the constructor, in each case.
 instance Show Value where
-  show v =
-    case v of
-      Addr n   -> show n
-      Etype et -> show et
-      VBool q  -> show q
-      VInt n   -> show n
+  show (Addr n)   = show n
+  show (Etype et) = show et
+  show (VBool q)  = show q
+  show (VInt n)   = show n
 
 -- | Value accessors.
---
--- TODO: This approach is reminiscent of the *Visitor* class, used to
---       implement polymorphic recursion in C++/Boost. It seems like
---       Haskell, with its accomodation of existential type
---       quantification, ought to be able to do this in a more elegant
---       fashion, but I lack experience in its use. Talk to Conal.
---       (See, also, *Packet abstraction*, below.)
 getAddr :: Value -> Maybe Integer
-getAddr val = case val of
-  Addr n -> Just n
-  _      -> Nothing
+getAddr (Addr n) = Just n
+getAddr _        = Nothing
 
 getEtype :: Value -> Maybe EthType
-getEtype val = case val of
-  Etype et -> Just et
-  _        -> Nothing
+getEtype (Etype et) = Just et
+getEtype _          = Nothing
 
 getVBool :: Value -> Maybe Bool
-getVBool val = case val of
-  VBool q -> Just q
-  _       -> Nothing
+getVBool (VBool q) = Just q
+getVBool _         = Nothing
 
 getVInt :: Value -> Maybe Int
-getVInt val = case val of
-  VInt n -> Just n
-  _      -> Nothing
+getVInt (VInt n) = Just n
+getVInt _        = Nothing
 
 -- | Actions
 --
@@ -167,7 +154,7 @@ getVInt val = case val of
 --       when I introduced lenses and their associated TH splice, below.
 --       (Moving the code back to its original location, below the TH
 --       splice, yields and "undefined constructor: Action" error, at
---       line 74.)
+--       line 74(ish).)
 data Action = Noop
             | Drop
             | Modify Field Value
@@ -178,16 +165,9 @@ data Action = Noop
 -- Note: The "_" prefix in the field names is required by *Control.Lens*,
 --       to make the Template Haskell splice, below, work.
 --
--- TODO: Talk to Conal about my choice of making everything a *Value*.
---       I did this, in order to avoid introducing existential type
---       quantification, in my *fieldToLens* function, below. But, I
---       need to make sure I'm thinking about this correctly. Maybe,
---       review the potential use cases and caveats of existential
---       types, in Haskell.
---
 -- TODO: There's an awkward 1:1 correspondence between the fields of
 --       the *Pkt* type and the value constructors of the *Field* type.
---       Can anything be done to make this more elegant?
+--       Can anything be done to make this more elegant? (TH?)
 data Pkt = Pkt
   { -- meta-data
     _inPort  :: Value
@@ -223,15 +203,17 @@ hdrFields = [FsrcAddr, FdstAddr, FeType]  -- Which fields to match on.
 -- | Row matching
 rowMatch :: Pkt -> TableRow -> Bool
 rowMatch pkt row = and
-  [matchVal (fields row Map.! fld) (acc pkt) | (fld, acc) <- zip hdrFields $ map (view . fieldToLens) hdrFields]
+  [matchVal (fields row ! fld) (acc pkt) | (fld, acc) <- zip hdrFields $ map (view . fieldToLens) hdrFields]
 
 matchVal :: Match -> Value -> Bool
-matchVal mtch v = case mtch of
-  NoMatch   -> True
-  Exact val -> v == val
-  Ternary n m | Addr n' <- v -> (n' .&. m) == (n .&. m)
-              | otherwise    -> False  -- error?
+matchVal NoMatch       _                = True
+matchVal (Exact val)   v                = v == val
+matchVal (Ternary n m) v | Addr n' <- v = (n' .&. m) == (n .&. m)
+                         | otherwise    = False  -- error?
 
+-- TODO: There has to be a way to use TH to eliminate this inelegance.
+--       Note that, in every case, the associated terms differ only
+--       by "F".
 fieldToLens :: Field -> Lens' Pkt Value
 fieldToLens fld = case fld of
   FinPort  -> inPort
@@ -243,13 +225,12 @@ fieldToLens fld = case fld of
 
 -- | Converts a P4 script into a behavioral model of a programmed switch.
 mkInterp :: P4Script -> P4Interp
-mkInterp script = P4Interp $ \pkts -> runState (traverse (procPkt stmts) pkts)
-  where stmts | Just outStmts <- egress script = inStmts ++ outStmts
-              | otherwise                      = inStmts
-        inStmts = ingress script
+mkInterp script = P4Interp $ runState . traverse (procPkt (ingress script ++ xtras))
+  where xtras | Just outStmts <- egress script = outStmts
+              | otherwise                      = []
 
 procPkt :: [Statement] -> Pkt -> State SwitchState Pkt
-procPkt stmts pkt = foldl (>>=) (return pkt) (map app $ concatMap mkOps stmts)
+procPkt stmts pkt = foldl (>>=) (return pkt) (map app $ concatMap mkOps stmts)  -- TODO: combine map & concatMap?
   where app f = \p ->
           do s <- get
              let (p', s') = f (p, s)
@@ -257,27 +238,26 @@ procPkt stmts pkt = foldl (>>=) (return pkt) (map app $ concatMap mkOps stmts)
              return p'
 
 mkOps :: Statement -> [Unop (Pkt, SwitchState)]
-mkOps stmt = case stmt of
-  Apply tbl hit miss -> [applyTbl tbl hit miss]
-  If e s1 s2         -> if evalExpr e then mkOps s1 else mkOps s2
-  User stmts         -> concatMap mkOps stmts
+mkOps (Apply tbl hit miss) = [applyTbl tbl hit miss]
+mkOps (If e s1 s2)         = mkOps $ if evalExpr e then s1 else s2
+mkOps (User stmts)         = concatMap mkOps stmts
 
 -- | Evaluate an Boolean expression.
+--
+-- TODO: Complete this.
 evalExpr :: Expr -> Bool
 evalExpr _ = True
 
 -- | Apply a single table to a packet.
---
--- TODO: Incorporate the switch state into this processing.
 applyTbl :: Table -> [Action] -> [Action] -> Unop (Pkt, SwitchState)
-applyTbl tbl hit miss (pkt, st) = let pkt' = foldl (.) id (map actionToFunc allActions) pkt
-                                      st'  = if Drop `elem` allActions then over pktsDropped (+ 1) $ st
-                                                                  else st
-                                  in  (pkt', st')
-  where extras | matched    = hit
-               | otherwise  = miss
-        (mActions, matched) = match tbl pkt
+applyTbl tbl hit miss (pkt, st) = (pkt', st')
+  where pkt' = foldl (.) id (map actionToFunc allActions) pkt
+        st'  = if Drop `elem` allActions then over pktsDropped (+ 1) st
+                                    else st
         allActions          = mActions ++ extras
+        (mActions, matched) = match tbl pkt
+        extras | matched    = hit
+               | otherwise  = miss
 
 -- | Attempt to match a packet, using a single table.
 match :: Table -> Pkt -> ([Action], Bool)
