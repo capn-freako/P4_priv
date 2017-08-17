@@ -23,6 +23,7 @@ module Language.P4.Interp
   ( mkInterp, mkTable, mkPkt
   , P4Interp(runP4), P4Script(..), Table, Pkt, SwitchState(..)
   , Statement(..), Field(..), Match(..), Value(..), EthType(..), Action(..)
+  , initSwitchState
   ) where
 
 import Control.Lens
@@ -73,6 +74,18 @@ instance Show SwitchState where
     , "Packets matched:\t" ++ show (_pktsMatched ss)
     , "Table hits:\t\t"    ++ show (_tblHits     ss)
     ]
+
+-- | Default initial switch state.
+--
+-- Users can invoke this, modifying it as necessary using record syntax.
+-- And this will be less fragile than having user code do the full
+-- initial state creation.
+initSwitchState = SwitchState
+  { _pktsLost    = 0
+  , _pktsDropped = 0
+  , _pktsMatched = 0
+  , _tblHits     = Map.empty
+  }
 
 -- | Match/action table abstraction.
 data Table = Table
