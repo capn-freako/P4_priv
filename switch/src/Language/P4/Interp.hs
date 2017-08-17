@@ -64,15 +64,17 @@ data SwitchState = SwitchState
   { _pktsLost    :: Integer
   , _pktsDropped :: Integer
   , _pktsMatched :: Integer
-  , _tblHits     :: Map Int Int
+  , _tblHits     :: Map Int   Int    -- table ID -> # hits
+  , _portAddrMap :: Map Value Value  -- port # -> MAC address
   }
 
 instance Show SwitchState where
   show ss = unlines
-    [ "Packets lost:\t\t"  ++ show (_pktsLost    ss)
-    , "Packets dropped:\t" ++ show (_pktsDropped ss)
-    , "Packets matched:\t" ++ show (_pktsMatched ss)
-    , "Table hits:\t\t"    ++ show (_tblHits     ss)
+    [ "Packets lost:\t\t"     ++ show (_pktsLost    ss)
+    , "Packets dropped:\t"    ++ show (_pktsDropped ss)
+    , "Packets matched:\t"    ++ show (_pktsMatched ss)
+    , "Table hits:\t\t"       ++ show (_tblHits     ss)
+    , "Port MAC addresses:\t" ++ show (_portAddrMap ss)
     ]
 
 -- | Default initial switch state.
@@ -85,6 +87,7 @@ initSwitchState = SwitchState
   , _pktsDropped = 0
   , _pktsMatched = 0
   , _tblHits     = Map.empty
+  , _portAddrMap = Map.empty
   }
 
 -- | Match/action table abstraction.
@@ -312,12 +315,13 @@ evalExpr _ = True
 applyTbl :: Table -> [Action] -> [Action] -> Unop (Pkt, SwitchState)
 applyTbl tbl hit miss (pkt, st) = (pkt', st')
   where pkt' = foldl (.) id (map actionToFunc allActions) pkt
-        st'   = if Drop `elem` allActions then over pktsDropped (+ 1) st''
-                                     else st''
-        st''  = if matched           then over pktsMatched (+ 1) st'''
-                                     else st'''
-        st''' = if matched           then over tblHits (bump $ tableID tbl) st
-                                     else st
+        st'         = if Drop `elem` allActions then over pktsDropped (+ 1) st''
+                                           else st''
+        st''        = if matched           then over pktsMatched (+ 1) st'''
+                                           else st'''
+        st'''       = if matched           then over tblHits (bump $ tableID tbl) st''''
+                                           else st''''
+        st''''      = over portAddrMap (Map.insert (_inPort pkt) (_srcAddr pkt)) st
         allActions          = mActions ++ extras
         (mActions, matched) = match tbl pkt
         extras | matched    = hit
