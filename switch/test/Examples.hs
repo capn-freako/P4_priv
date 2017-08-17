@@ -10,6 +10,7 @@
 
 module Main where
 
+import qualified Data.Map.Strict as Map
 import Language.P4.Interp
 
 main :: IO ()
@@ -35,6 +36,8 @@ testP4 nm rprt dut pkts st = rprt nm $ runP4 dut pkts st
 initState = SwitchState
   { _pktsLost    = 0
   , _pktsDropped = 0
+  , _pktsMatched = 0
+  , _tblHits     = Map.empty
   }
 
 -- Reports.

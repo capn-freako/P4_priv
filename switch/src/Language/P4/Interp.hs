@@ -30,7 +30,7 @@ import Control.Monad.State
 import Data.Bits
 import Data.Function (on)
 import Data.List
-import Data.Map.Strict ((!), Map, fromList, member)  -- , keys)
+import Data.Map.Strict ((!), Map, fromList, member, adjust)  -- , keys)
 import qualified Data.Map.Strict as Map
 
 -- | Behavioral P4 interpreter.
@@ -62,12 +62,16 @@ type Switch = [Pkt] -> SwitchState -> ([Pkt], SwitchState)
 data SwitchState = SwitchState
   { _pktsLost    :: Integer
   , _pktsDropped :: Integer
+  , _pktsMatched :: Integer
+  , _tblHits     :: Map Int Int
   }
 
 instance Show SwitchState where
   show ss = unlines
-    [ "Packets lost:\t\t" ++ show (_pktsLost ss)
+    [ "Packets lost:\t\t"  ++ show (_pktsLost    ss)
     , "Packets dropped:\t" ++ show (_pktsDropped ss)
+    , "Packets matched:\t" ++ show (_pktsMatched ss)
+    , "Table hits:\t\t"    ++ show (_tblHits     ss)
     ]
 
 -- | Match/action table abstraction.
@@ -295,12 +299,18 @@ evalExpr _ = True
 applyTbl :: Table -> [Action] -> [Action] -> Unop (Pkt, SwitchState)
 applyTbl tbl hit miss (pkt, st) = (pkt', st')
   where pkt' = foldl (.) id (map actionToFunc allActions) pkt
-        st'  = if Drop `elem` allActions then over pktsDropped (+ 1) st
-                                    else st
+        st'   = if Drop `elem` allActions then over pktsDropped (+ 1) st''
+                                     else st''
+        st''  = if matched           then over pktsMatched (+ 1) st'''
+                                     else st'''
+        st''' = if matched           then over tblHits (bump $ tableID tbl) st
+                                     else st
         allActions          = mActions ++ extras
         (mActions, matched) = match tbl pkt
         extras | matched    = hit
                | otherwise  = miss
+        bump k m            = if k `member` m then adjust     (+ 1) k m
+                                              else Map.insert k     1 m
 
 -- | Attempt to match a packet, using a single table.
 match :: Table -> Pkt -> ([Action], Bool)
