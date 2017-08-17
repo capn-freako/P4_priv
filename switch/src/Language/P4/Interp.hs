@@ -20,7 +20,7 @@
 ----------------------------------------------------------------------
 
 module Language.P4.Interp
-  ( mkInterp, mkTable, mkPkt
+  ( mkInterp, mkTable, mkPkt, mkRefPkt
   , P4Interp(runP4), P4Script(..), Table, Pkt, SwitchState(..)
   , Statement(..), Field(..), Match(..), Value(..), EthType(..), Action(..)
   , initSwitchState
@@ -67,7 +67,7 @@ data SwitchState = SwitchState
   , _tblHits     :: Map Int   Int    -- table ID -> # hits
   , _portAddrMap :: Map Value Value  -- port # -> MAC address
   , _addrPortMap :: Map Value Value  -- MAC address -> port #
-  }
+  } deriving (Eq)
 
 instance Show SwitchState where
   show ss = unlines
@@ -118,7 +118,6 @@ instance Eq TableRow where
 -- definition of the *Match* data type, below.
 instance Ord TableRow where
   compare = compare `on` fields
-  -- compare (fields -> x) (fields -> y) = foldl mappend EQ [compare (x!k) (y!k) | k <- keys x]
 
 data Field    = FinPort
               | FoutPort
@@ -208,7 +207,7 @@ data Pkt = Pkt
   , _eType   :: Value
     -- payload
   , _pyldSize :: Value     -- For now, just note the size of the payload.
-  }
+  } deriving (Eq)
 
 -- This TH splice builds lenses for all fields in *Pkt* automatically.
 $(makeLenses ''Pkt)
@@ -240,6 +239,19 @@ mkPkt (inP, srcA, dstA, eT, pyldSz) =
     , _outPort  = VInt 0  -- undefined
     , _vlanId   = VInt 0  -- undefined
     , _dropped  = VBool False
+    , _srcAddr  = Addr srcA
+    , _dstAddr  = Addr dstA
+    , _eType    = Etype eT
+    , _pyldSize = VInt pyldSz
+    }
+
+mkRefPkt :: (Int, Int, Int, Bool, Integer , Integer, EthType, Int) -> Pkt
+mkRefPkt (inP, outP, vID, drpd, srcA, dstA, eT, pyldSz) =
+  Pkt
+    { _inPort   = VInt inP
+    , _outPort  = VInt outP
+    , _vlanId   = VInt vID
+    , _dropped  = VBool drpd
     , _srcAddr  = Addr srcA
     , _dstAddr  = Addr dstA
     , _eType    = Etype eT
