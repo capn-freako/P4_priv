@@ -66,6 +66,7 @@ data SwitchState = SwitchState
   , _pktsMatched :: Integer
   , _tblHits     :: Map Int   Int    -- table ID -> # hits
   , _portAddrMap :: Map Value Value  -- port # -> MAC address
+  , _addrPortMap :: Map Value Value  -- MAC address -> port #
   }
 
 instance Show SwitchState where
@@ -88,6 +89,7 @@ initSwitchState = SwitchState
   , _pktsMatched = 0
   , _tblHits     = Map.empty
   , _portAddrMap = Map.empty
+  , _addrPortMap = Map.empty
   }
 
 -- | Match/action table abstraction.
@@ -314,14 +316,17 @@ evalExpr _ = True
 -- | Apply a single table to a packet.
 applyTbl :: Table -> [Action] -> [Action] -> Unop (Pkt, SwitchState)
 applyTbl tbl hit miss (pkt, st) = (pkt', st')
-  where pkt' = foldl (.) id (map actionToFunc allActions) pkt
+  where pkt' = foldl (.) id (map actionToFunc allActions) pkt''
+        pkt'' | Just v <- Map.lookup (_dstAddr pkt) (_addrPortMap st) = set outPort v pkt
+              | otherwise                                         = pkt
         st'         = if Drop `elem` allActions then over pktsDropped (+ 1) st''
                                            else st''
         st''        = if matched           then over pktsMatched (+ 1) st'''
                                            else st'''
         st'''       = if matched           then over tblHits (bump $ tableID tbl) st''''
                                            else st''''
-        st''''      = over portAddrMap (Map.insert (_inPort pkt) (_srcAddr pkt)) st
+        st''''      = over portAddrMap (Map.insert (_inPort pkt) (_srcAddr pkt)) st'''''
+        st'''''     = over addrPortMap (Map.insert (_srcAddr pkt) (_inPort pkt)) st
         allActions          = mActions ++ extras
         (mActions, matched) = match tbl pkt
         extras | matched    = hit

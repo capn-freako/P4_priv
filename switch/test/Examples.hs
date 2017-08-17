@@ -77,6 +77,6 @@ tblDropNMB = mkTable
 simplePkts = map mkPkt
   --  inP    srcAd     dstAd      eT       pyldSz
   [ (  1,       82,       83,     IP,          10 )
-  , (  1,       82,       83,    NMB,          10 )
+  , (  2,       83,       82,    NMB,          10 )
   ]
 
