@@ -17,9 +17,10 @@ import Language.P4.Interp
 main :: IO ()
 main = sequence_
   [ putChar '\n' -- return ()
-  , testP4 "dummy"  dummyRprt  Nothing                    (mkInterp dummyScript)  []         initState
-  , testP4 "simple" simpleRprt Nothing                    (mkInterp simpleScript) simplePkts initState
-  , testP4 "test"   testRprt   (Just (refPkts, refState)) (mkInterp simpleScript) simplePkts initState
+  , testP4 "dummy"  dummyRprt  Nothing                      (mkInterp dummyScript)  []         initState
+  , testP4 "simple" simpleRprt Nothing                      (mkInterp simpleScript) simplePkts initState
+  , testP4 "test"   testRprt   (Just (refPkts,  refState))  (mkInterp simpleScript) simplePkts initState
+  , testP4 "test1"  testRprt   (Just (ref1Pkts, ref1State)) (mkInterp simpleScript) test1Pkts  initState
   ]
 
 {--------------------------------------------------------------------
@@ -48,15 +49,6 @@ initState = initSwitchState
   , _pktsDropped = 0
   }
 
-refState = initSwitchState
-  { _pktsLost    = 0
-  , _pktsDropped = 1
-  , _pktsMatched = 1
-  , _tblHits     = fromList [(0::Int,1::Int)]
-  , _portAddrMap = fromList [(VInt 1, Addr 82),(VInt 2, Addr 83)]
-  , _addrPortMap = fromList [(Addr 82, VInt 1),(Addr 83, VInt 2)]
-  }
-
 -- Reports.
 dummyRprt nm _ _ = do
   putStrLn $ "Testing " ++ nm ++ "..."
@@ -74,7 +66,7 @@ testRprt _ Nothing _ = error "testRprt called without test reference!"
 testRprt nm (Just (rPkts, rState)) (outPkts, outState) =
   do putStrLn $ "Testing " ++ nm ++ "..."
      putStrLn $ "Final switch state: " ++
-       if outState == rState then "PASS" else "FAIL"
+       if outState == rState then "PASS" else stateFailStr
      putStrLn $ "Packet comparison results: " ++
        if outPkts == rPkts then "All match."
                           else partialPktMatchStr
@@ -82,6 +74,24 @@ testRprt nm (Just (rPkts, rState)) (outPkts, outState) =
         matchRatio         = ( fromIntegral (length (filter (uncurry (==)) $ zip rPkts outPkts)) /
                                (fromIntegral $ length outPkts)
                              ) :: Float
+        stateFailStr       =
+          unlines
+            [ "FAIL"
+            , "Expected:"
+            , "\tLost packets:\t\t"     ++ (show $ _pktsLost    rState)
+            , "\tDropped packets:\t"  ++ (show $ _pktsDropped rState)
+            , "\tMatched packets:\t"  ++ (show $ _pktsMatched rState)
+            , "\tTable hits:\t\t"       ++ (show $ _tblHits     rState)
+            , "\tPort address map:\t" ++ (show $ _portAddrMap rState)
+            , "\tAddress port map:\t" ++ (show $ _addrPortMap rState)
+            , "Got:"
+            , "\tLost packets:\t\t"     ++ (show $ _pktsLost    outState)
+            , "\tDropped packets:\t"  ++ (show $ _pktsDropped outState)
+            , "\tMatched packets:\t"  ++ (show $ _pktsMatched outState)
+            , "\tTable hits:\t\t"       ++ (show $ _tblHits     outState)
+            , "\tPort address map:\t" ++ (show $ _portAddrMap outState)
+            , "\tAddress port map:\t" ++ (show $ _addrPortMap outState)
+            ]
 
 -- P4 Scripts.
 dummyScript = P4Script
@@ -106,6 +116,7 @@ tblDropNMB = mkTable
   )
 
 -- Packet lists.
+-- - simple test
 simplePkts = map mkPkt
   --  inP    srcAd     dstAd      eT       pyldSz
   [ (  1,       82,       83,     IP,          10 )
@@ -117,4 +128,51 @@ refPkts = map mkRefPkt
   [ (   1,      0,      0,  False,             82,             83,     IP,     10 )
   , (   2,      1,      0,   True,             83,             82,    NMB,     10 )
   ]
+
+refState = initSwitchState
+  { _pktsLost    = 0
+  , _pktsDropped = 1
+  , _pktsMatched = 1
+  , _tblHits     = fromList [(0::Int,1::Int)]
+  , _portAddrMap = fromList [(VInt 1, Addr 82),(VInt 2, Addr 83)]
+  , _addrPortMap = fromList [(Addr 82, VInt 1),(Addr 83, VInt 2)]
+  }
+
+-- - test #1
+test1Pkts = map mkPkt
+  --  inP    srcAd     dstAd      eT       pyldSz
+  [ (  1,       81,       82,     IP,          10 )
+  , (  2,       82,       81,    NMB,          10 )
+  , (  1,       81,       83,     IP,          20 )
+  , (  3,       83,       81,    NMB,          10 )
+  , (  3,       83,       82,     IP,         100 )
+  , (  4,       83,       83,    NMB,          10 )
+  , (  4,       84,       83,     IP,          10 )
+  , (  3,       83,       85,    NMB,          10 )
+  , (  4,       84,       83,    NMB,          10 )
+  , (  3,       83,       84,     IP,          10 )
+  ]
+
+ref1Pkts = map mkRefPkt
+  --  inP    outP  vlanID dropped           srcAd           dstAd      eT  pyldSz
+  [ (   1,      0,      0,  False,             81,             82,     IP,     10 )
+  , (   2,      1,      0,   True,             82,             81,    NMB,     10 )
+  , (   1,      0,      0,  False,             81,             83,     IP,     20 )
+  , (   3,      1,      0,   True,             83,             81,    NMB,     10 )
+  , (   3,      2,      0,  False,             83,             82,     IP,    100 )
+  , (   4,      3,      0,   True,             83,             83,    NMB,     10 )
+  , (   4,      4,      0,  False,             84,             83,     IP,     10 )
+  , (   3,      0,      0,   True,             83,             85,    NMB,     10 )
+  , (   4,      3,      0,   True,             84,             83,    NMB,     10 )
+  , (   3,      4,      0,  False,             83,             84,     IP,     10 )
+  ]
+
+ref1State = initSwitchState
+  { _pktsLost    = 0
+  , _pktsDropped = 5
+  , _pktsMatched = 5
+  , _tblHits     = fromList [(0::Int,5::Int)]
+  , _portAddrMap = fromList [(VInt 1, Addr 81),(VInt 2, Addr 82),(VInt 3, Addr 83),(VInt 4, Addr 84)]
+  , _addrPortMap = fromList [(Addr 81, VInt 1),(Addr 82, VInt 2),(Addr 83, VInt 3),(Addr 84, VInt 4)]
+  }
 

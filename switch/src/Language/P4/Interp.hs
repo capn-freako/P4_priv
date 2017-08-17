@@ -326,6 +326,9 @@ evalExpr :: Expr -> Bool
 evalExpr _ = True
 
 -- | Apply a single table to a packet.
+--
+-- TODO: Flag changes in MAC addresses of already mapped ports.
+--       Flag duplicate MAC addresses from different ports.
 applyTbl :: Table -> [Action] -> [Action] -> Unop (Pkt, SwitchState)
 applyTbl tbl hit miss (pkt, st) = (pkt', st')
   where pkt' = foldl (.) id (map actionToFunc allActions) pkt''
