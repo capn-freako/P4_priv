@@ -10,13 +10,12 @@
 
 module Main where
 
-import qualified Data.Map as Map
 import Language.P4.Interp
 
 main :: IO ()
 main = sequence_
   [ putChar '\n' -- return ()
-  -- , testP4 "dummy" dummyRprt (mkInterp dummyScript) [] initState
+  , testP4 "dummy" dummyRprt (mkInterp dummyScript) [] initState
   , testP4 "simple" simpleRprt (mkInterp simpleScript) simplePkts initState
   ]
 
@@ -65,45 +64,18 @@ simpleScript = P4Script
   }
 
 -- Tables.
-tblDropNMB = Table
-  { tableID = 0
-  , rows =
-      [ TableRow
-          { rowID  = 0
-          , fields = Map.fromList
-                       [ (FeType,   Exact $ Etype NMB)
-                       , (FsrcAddr, NoMatch)
-                       , (FdstAddr, NoMatch)
-                       ]
-          , params = Map.empty
-          , actions =
-              [ Drop
-              ]
-          }
-      ]
-  }
+tblDropNMB = mkTable
+  ( 0                                        -- table ID
+  , [ FeType ]                               -- fields to match
+  , []                                       -- parameters to set
+  , [ ( 0, [Exact $ Etype NMB], [], [Drop] ) -- rows ([(ID,[Match],[Value],[Action])])
+    ]
+  )
 
 -- Packet lists.
-simplePkts =
-  [ Pkt
-      { _inPort   = VInt  1
-      , _outPort  = VInt  0
-      , _vlanId   = VInt  0
-      , _dropped  = VBool False
-      , _srcAddr  = Addr  82
-      , _dstAddr  = Addr  83
-      , _eType    = Etype IP
-      , _pyldSize = VInt  10
-      }
-  , Pkt
-      { _inPort   = VInt  1
-      , _outPort  = VInt  0
-      , _vlanId   = VInt  0
-      , _dropped  = VBool False
-      , _srcAddr  = Addr  82
-      , _dstAddr  = Addr  83
-      , _eType    = Etype NMB
-      , _pyldSize = VInt  10
-      }
+simplePkts = map mkPkt
+  --  inP    srcAd     dstAd      eT       pyldSz
+  [ (  1,       82,       83,     IP,          10 )
+  , (  1,       82,       83,    NMB,          10 )
   ]
 

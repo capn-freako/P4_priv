@@ -1,4 +1,5 @@
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RankNTypes   #-}
+{-# LANGUAGE ViewPatterns #-}
 
 {-# LANGUAGE TemplateHaskell #-}
 
@@ -18,14 +19,19 @@
 -- Behavioral modeling of P4-programmable switches.
 ----------------------------------------------------------------------
 
-module Language.P4.Interp where
+module Language.P4.Interp
+  ( mkInterp, mkTable, mkPkt
+  , P4Interp(runP4), P4Script(..), Table, Pkt, SwitchState(..)
+  , Statement(..), Field(..), Match(..), Value(..), EthType(..), Action(..)
+  ) where
 
 import Control.Lens
 import Control.Monad.State
 import Data.Bits
 import Data.Function (on)
 import Data.List
-import Data.Map.Strict ((!), keys, Map)
+import Data.Map.Strict ((!), Map, fromList, member)  -- , keys)
+import qualified Data.Map.Strict as Map
 
 -- | Behavioral P4 interpreter.
 --
@@ -52,6 +58,7 @@ newtype P4Interp = P4Interp { runP4 :: Switch }
 
 -- | Type definition of a configured switch.
 type Switch = [Pkt] -> SwitchState -> ([Pkt], SwitchState)
+
 data SwitchState = SwitchState
   { _pktsLost    :: Integer
   , _pktsDropped :: Integer
@@ -88,9 +95,8 @@ instance Eq TableRow where
 -- *Exact* constructor before the *Ternary* constructor in the
 -- definition of the *Match* data type, below.
 instance Ord TableRow where
-  compare rx ry = foldl mappend EQ [compare (x!k) (y!k) | k <- keys x]
-    where x = fields rx
-          y = fields ry
+  compare = compare `on` fields
+  -- compare (fields -> x) (fields -> y) = foldl mappend EQ [compare (x!k) (y!k) | k <- keys x]
 
 data Field    = FinPort
               | FoutPort
@@ -199,6 +205,43 @@ instance Show Pkt where
     "\tPayload size:\t\t"       ++ show (_pyldSize p) ++ "\n"
 
 hdrFields = [FsrcAddr, FdstAddr, FeType]  -- Which fields to match on.
+
+-- | Exported packet builder.
+--
+-- To be used by clients to build packets, as opposed to constructing
+-- them manually, in order to protect them from changes in
+-- implementation details.
+mkPkt :: (Int, Integer , Integer, EthType, Int) -> Pkt
+mkPkt (inP, srcA, dstA, eT, pyldSz) =
+  Pkt
+    { _inPort   = VInt inP
+    , _outPort  = VInt 0  -- undefined
+    , _vlanId   = VInt 0  -- undefined
+    , _dropped  = VBool False
+    , _srcAddr  = Addr srcA
+    , _dstAddr  = Addr dstA
+    , _eType    = Etype eT
+    , _pyldSize = VInt pyldSz
+    }
+
+-- | Exported table builder.
+mkTable :: (Int, [Field], [Param], [(Int,[Match],[Value],[Action])]) -> Table
+mkTable (tblID, flds, pNames, tblRows) =
+  Table
+    { tableID = tblID
+    , rows    = map (mkRow flds pNames) tblRows
+    }
+
+mkRow :: [Field] -> [Param] -> (Int,[Match],[Value],[Action]) -> TableRow
+mkRow flds parms (rID, matches, pVals, acts) =
+  TableRow
+    { rowID   = rID
+    , fields  = fillMissingFields $ fromList $ zip flds   matches
+    , params  = fromList $ zip parms  pVals
+    , actions = acts
+    }
+  where fillMissingFields m = foldl addIfMissing m hdrFields
+        addIfMissing m f    = if f `member` m then m else Map.insert f NoMatch m
 
 -- | Row matching
 rowMatch :: Pkt -> TableRow -> Bool
