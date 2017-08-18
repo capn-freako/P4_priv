@@ -20,10 +20,10 @@
 ----------------------------------------------------------------------
 
 module Language.P4.Interp
-  ( mkInterp, mkTable, mkPkt, mkRefPkt
+  ( mkInterp, mkTable, mkPkt, mkRefPkt, initSwitchState
   , P4Interp(runP4), P4Script(..), Table, Pkt, SwitchState(..)
   , Statement(..), Field(..), Match(..), Value(..), EthType(..), Action(..)
-  , initSwitchState
+  , Param(..)
   ) where
 
 import Control.Lens
@@ -333,15 +333,15 @@ applyTbl :: Table -> [Action] -> [Action] -> Unop (Pkt, SwitchState)
 applyTbl tbl hit miss (pkt, st) = (pkt', st')
   where pkt' = foldl (.) id (map actionToFunc allActions) pkt''
         pkt'' | Just v <- Map.lookup (_dstAddr pkt) (_addrPortMap st) = set outPort v pkt
-              | otherwise                                         = pkt
+              | otherwise                                             = pkt
         st'         = if Drop `elem` allActions then over pktsDropped (+ 1) st''
                                            else st''
         st''        = if matched           then over pktsMatched (+ 1) st'''
                                            else st'''
         st'''       = if matched           then over tblHits (bump $ tableID tbl) st''''
                                            else st''''
-        st''''      = over portAddrMap (Map.insert (_inPort pkt) (_srcAddr pkt)) st'''''
-        st'''''     = over addrPortMap (Map.insert (_srcAddr pkt) (_inPort pkt)) st
+        st''''      = over portAddrMap (Map.insert (_inPort  pkt) (_srcAddr pkt)) st'''''
+        st'''''     = over addrPortMap (Map.insert (_srcAddr pkt) (_inPort pkt))  st
         allActions          = mActions ++ extras
         (mActions, matched) = match tbl pkt
         extras | matched    = hit

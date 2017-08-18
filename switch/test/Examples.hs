@@ -21,6 +21,9 @@ main = sequence_
   , testP4 "simple" simpleRprt Nothing                      (mkInterp simpleScript) simplePkts initState
   , testP4 "test"   testRprt   (Just (refPkts,  refState))  (mkInterp simpleScript) simplePkts initState
   , testP4 "test1"  testRprt   (Just (ref1Pkts, ref1State)) (mkInterp simpleScript) test1Pkts  initState
+  , testP4 "test2"  testRprt   (Just (ref2Pkts, ref2State)) (mkInterp test2Script)  test2Pkts  initState
+  , testP4 "test3"  testRprt   (Just (ref3Pkts, ref3State)) (mkInterp test3Script)  test3Pkts  initState
+  , testP4 "test4"  testRprt   (Just (ref4Pkts, ref4State)) (mkInterp test4Script)  test4Pkts  initState
   ]
 
 {--------------------------------------------------------------------
@@ -54,15 +57,14 @@ dummyRprt nm _ _ = do
   putStrLn $ "Testing " ++ nm ++ "..."
   putStrLn "\tHello, World!"
 
-simpleRprt nm _ res =
-  let outPkts = fst res
-  in do putStrLn $ "Testing " ++ nm ++ "..."
-        putStrLn $ "Output packets (" ++ show (length outPkts) ++ "):"
-        _ <- mapM print (fst res)
-        putStrLn "Final switch state:"
-        print (snd res)
+simpleRprt nm _ (outPkts, outState) =
+  do putStrLn $ "Testing " ++ nm ++ "..."
+     putStrLn $ "Output packets (" ++ show (length outPkts) ++ "):"
+     _ <- mapM print outPkts
+     putStrLn "Final switch state:"
+     print outState
 
-testRprt _ Nothing _ = error "testRprt called without test reference!"
+testRprt _  Nothing                _                   = error "testRprt called without test reference!"
 testRprt nm (Just (rPkts, rState)) (outPkts, outState) =
   do putStrLn $ "Testing " ++ nm ++ "..."
      putStrLn $ "Final switch state: " ++
@@ -76,24 +78,12 @@ testRprt nm (Just (rPkts, rState)) (outPkts, outState) =
                              ) :: Float
         stateFailStr       =
           unlines
-            [ "FAIL"
-            , "Expected:"
-            , "\tLost packets:\t\t"     ++ (show $ _pktsLost    rState)
-            , "\tDropped packets:\t"  ++ (show $ _pktsDropped rState)
-            , "\tMatched packets:\t"  ++ (show $ _pktsMatched rState)
-            , "\tTable hits:\t\t"       ++ (show $ _tblHits     rState)
-            , "\tPort address map:\t" ++ (show $ _portAddrMap rState)
-            , "\tAddress port map:\t" ++ (show $ _addrPortMap rState)
-            , "Got:"
-            , "\tLost packets:\t\t"     ++ (show $ _pktsLost    outState)
-            , "\tDropped packets:\t"  ++ (show $ _pktsDropped outState)
-            , "\tMatched packets:\t"  ++ (show $ _pktsMatched outState)
-            , "\tTable hits:\t\t"       ++ (show $ _tblHits     outState)
-            , "\tPort address map:\t" ++ (show $ _portAddrMap outState)
-            , "\tAddress port map:\t" ++ (show $ _addrPortMap outState)
+            [ "FAIL\n"
+            , "Expected:\n" ++ (show rState)
+            , "Got:\n"      ++ (show outState)
             ]
 
--- P4 Scripts.
+-- Example P4 Scripts.
 dummyScript = P4Script
   { ingress = []
   , egress  = Nothing
@@ -115,8 +105,16 @@ tblDropNMB = mkTable
     ]
   )
 
--- Packet lists.
--- - simple test
+tblRemap83 = mkTable
+  ( 1
+  , [ FdstAddr ]
+  , [ PoutPort ]
+  -- , [ ( 0, [Exact $ Addr 83], [VInt 255], [Modify FoutPort PoutPort] )
+  , [ ( 0, [Exact $ Addr 83], [VInt 255], [Modify FoutPort (VInt 255)] )
+    ]
+  )
+
+-- Example packet lists (input & reference).
 simplePkts = map mkPkt
   --  inP    srcAd     dstAd      eT       pyldSz
   [ (  1,       82,       83,     IP,          10 )
@@ -129,11 +127,12 @@ refPkts = map mkRefPkt
   , (   2,      1,      0,   True,             83,             82,    NMB,     10 )
   ]
 
+-- Example reference final switch state definition.
 refState = initSwitchState
   { _pktsLost    = 0
   , _pktsDropped = 1
   , _pktsMatched = 1
-  , _tblHits     = fromList [(0::Int,1::Int)]
+  , _tblHits     = fromList [(0,1)]
   , _portAddrMap = fromList [(VInt 1, Addr 82),(VInt 2, Addr 83)]
   , _addrPortMap = fromList [(Addr 82, VInt 1),(Addr 83, VInt 2)]
   }
@@ -171,8 +170,62 @@ ref1State = initSwitchState
   { _pktsLost    = 0
   , _pktsDropped = 5
   , _pktsMatched = 5
-  , _tblHits     = fromList [(0::Int,5::Int)]
+  , _tblHits     = fromList [(0,5)]
   , _portAddrMap = fromList [(VInt 1, Addr 81),(VInt 2, Addr 82),(VInt 3, Addr 83),(VInt 4, Addr 84)]
   , _addrPortMap = fromList [(Addr 81, VInt 1),(Addr 82, VInt 2),(Addr 83, VInt 3),(Addr 84, VInt 4)]
   }
+
+-- - test #2
+test2Script = P4Script
+  { ingress =
+      [ Apply tblDropNMB [] []
+      , Apply tblRemap83 [] []
+      ]
+  , egress  = Nothing
+  }
+
+test2Pkts = test1Pkts
+
+ref2Pkts = map mkRefPkt
+  --  inP    outP  vlanID dropped           srcAd           dstAd      eT  pyldSz
+  [ (   1,      0,      0,  False,             81,             82,     IP,     10 )
+  , (   2,      1,      0,   True,             82,             81,    NMB,     10 )
+  , (   1,    255,      0,  False,             81,             83,     IP,     20 )
+  , (   3,      1,      0,   True,             83,             81,    NMB,     10 )
+  , (   3,      2,      0,  False,             83,             82,     IP,    100 )
+  , (   4,    255,      0,   True,             83,             83,    NMB,     10 )
+  , (   4,    255,      0,  False,             84,             83,     IP,     10 )
+  , (   3,      0,      0,   True,             83,             85,    NMB,     10 )
+  , (   4,    255,      0,   True,             84,             83,    NMB,     10 )
+  , (   3,      4,      0,  False,             83,             84,     IP,     10 )
+  ]
+
+ref2State = initSwitchState
+  { _pktsLost    = 0
+  , _pktsDropped = 5
+  , _pktsMatched = 9
+  , _tblHits     = fromList [(0,5),(1,4)]
+  , _portAddrMap = fromList [(VInt 1, Addr 81),(VInt 2, Addr 82),(VInt 3, Addr 83),(VInt 4, Addr 84)]
+  , _addrPortMap = fromList [(Addr 81, VInt 1),(Addr 82, VInt 2),(Addr 83, VInt 3),(Addr 84, VInt 4)]
+  }
+
+-- - test #3
+test3Script = P4Script
+  { ingress =
+      [ Apply tblDropNMB [] []
+      ]
+  , egress  = Just
+      [ Apply tblRemap83 [] []
+      ]
+  }
+
+test3Pkts = test2Pkts
+ref3Pkts  = ref2Pkts
+ref3State = ref2State
+
+-- - test #4
+test4Script = test3Script
+test4Pkts   = test2Pkts
+ref4Pkts    = ref2Pkts
+ref4State   = ref2State { _pktsLost = 1 }
 
