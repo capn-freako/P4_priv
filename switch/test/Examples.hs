@@ -23,7 +23,7 @@ main = sequence_ $
   , testP4 "dummy"  dummyRprt  Nothing                      (mkInterp dummyScript)  []         initState
   , testP4 "simple" simpleRprt Nothing                      (mkInterp simpleScript) simplePkts initState
   , testP4 "test"   testRprt   (Just (refPkts,  refState))  (mkInterp simpleScript) simplePkts initState
-  ] ++ $(mkTests 4)
+  ] ++ $(mkTests 4)  -- Bump the number, if you add more tests, below.
 
 {--------------------------------------------------------------------
     Testing utilities
@@ -96,6 +96,9 @@ simpleScript = P4Script
   }
 
 -- Tables.
+--
+-- TODO: Review the P4 language specification, to resolve the following:
+--       1. Do we supply literal arguments, or draw from parameters, for Modify?
 tblDropNMB = mkTable
   ( 0                                        -- table ID
   , [ FeType ]                               -- fields to match
