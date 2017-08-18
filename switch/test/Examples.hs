@@ -4,6 +4,8 @@
 --
 -- You might also want to use stack's --file-watch flag for automatic recompilation.
 
+{-# LANGUAGE TemplateHaskell #-}
+
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
@@ -13,18 +15,15 @@ module Main where
 import Data.Map.Strict (fromList)
 import Text.Printf
 import Language.P4.Interp
+import Language.P4.Util
 
 main :: IO ()
-main = sequence_
+main = sequence_ $
   [ putChar '\n' -- return ()
   , testP4 "dummy"  dummyRprt  Nothing                      (mkInterp dummyScript)  []         initState
   , testP4 "simple" simpleRprt Nothing                      (mkInterp simpleScript) simplePkts initState
   , testP4 "test"   testRprt   (Just (refPkts,  refState))  (mkInterp simpleScript) simplePkts initState
-  , testP4 "test1"  testRprt   (Just (ref1Pkts, ref1State)) (mkInterp simpleScript) test1Pkts  initState
-  , testP4 "test2"  testRprt   (Just (ref2Pkts, ref2State)) (mkInterp test2Script)  test2Pkts  initState
-  , testP4 "test3"  testRprt   (Just (ref3Pkts, ref3State)) (mkInterp test3Script)  test3Pkts  initState
-  , testP4 "test4"  testRprt   (Just (ref4Pkts, ref4State)) (mkInterp test4Script)  test4Pkts  initState
-  ]
+  ] ++ $(mkTests 4)
 
 {--------------------------------------------------------------------
     Testing utilities
@@ -138,6 +137,8 @@ refState = initSwitchState
   }
 
 -- - test #1
+test1Script = simpleScript
+
 test1Pkts = map mkPkt
   --  inP    srcAd     dstAd      eT       pyldSz
   [ (  1,       81,       82,     IP,          10 )

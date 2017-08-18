@@ -34,6 +34,8 @@ import Data.List
 import Data.Map.Strict ((!), Map, fromList, member, adjust)  -- , keys)
 import qualified Data.Map.Strict as Map
 
+import Language.P4.Util
+
 -- | Behavioral P4 interpreter.
 --
 -- Note: Parser modeling has been omitted. Therefore, test packet data
@@ -386,11 +388,4 @@ data Stateful = Counter
 
 -- | Conditional expressions.
 type Expr = Bool
-
--- | Misc. utilities.
-type Unop a = a -> a
-
-safeHead :: [a] -> Maybe a
-safeHead []    = Nothing
-safeHead (x:_) = Just x
 
