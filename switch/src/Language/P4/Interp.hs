@@ -6,6 +6,7 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
+{-# OPTIONS_GHC -ddump-splices #-}
 
 ----------------------------------------------------------------------
 -- |
@@ -62,6 +63,41 @@ newtype P4Interp = P4Interp { runP4 :: Switch }
 -- | Type definition of a configured switch.
 type Switch = [Pkt] -> SwitchState -> ([Pkt], SwitchState)
 
+-- | Packet abstraction.
+--
+-- Note: The "_" prefix in the field names is required by *Control.Lens*,
+--       to make the Template Haskell splice, below, work.
+--
+-- TODO: There's an awkward 1:1 correspondence between the fields of
+--       the *Pkt* type and the value constructors of both the *Field*
+--       and *Param* types.
+--       Can anything be done to make this more elegant? (TH?)
+data Pkt = Pkt
+  { -- meta-data
+    _inPort  :: Value
+  , _outPort :: Value
+  , _vlanId  :: Value
+  , _dropped :: Value
+    -- header
+  , _srcAddr :: Value
+  , _dstAddr :: Value
+  , _eType   :: Value
+    -- payload
+  , _pyldSize :: Value     -- For now, just note the size of the payload.
+  } deriving (Eq)
+
+instance Show Pkt where
+  show p =
+    "Packet:\n" ++
+    "\tIn port:\t\t"            ++ show (_inPort p)   ++ "\n" ++
+    "\tOut port:\t\t"           ++ show (_outPort p)  ++ "\n" ++
+    "\tVLAN ID:\t\t"            ++ show (_vlanId p)   ++ "\n" ++
+    "\tDropped:\t\t"            ++ show (_dropped p)  ++ "\n" ++
+    "\tSource MAC Addr:\t"      ++ show (_srcAddr p)  ++ "\n" ++
+    "\tDestination MAC Addr:\t" ++ show (_dstAddr p)  ++ "\n" ++
+    "\tEthernet type:\t\t"      ++ show (_eType p)    ++ "\n" ++
+    "\tPayload size:\t\t"       ++ show (_pyldSize p) ++ "\n"
+
 data SwitchState = SwitchState
   { _pktsLost    :: Integer
   , _pktsDropped :: Integer
@@ -93,6 +129,23 @@ initSwitchState = SwitchState
   , _portAddrMap = Map.empty
   , _addrPortMap = Map.empty
   }
+
+-- | Polymorphic value type, used throughout.
+--
+-- Note: Experimentation reveals that this code must remain early on in
+--       the source, presumably due to the TH splice used to create its
+--       *Show* instance.
+data Value    = Addr  Integer
+              | Etype EthType
+              | VBool Bool
+              | VInt  Int
+  deriving (Eq, Ord)
+
+data EthType  = IP
+              | NMB
+  deriving (Show, Eq, Ord)
+
+$(mkShow ''Value)
 
 -- | Match/action table abstraction.
 data Table = Table
@@ -137,95 +190,24 @@ data Param    = PinPort
               | PeType
   deriving (Show, Eq, Ord)
 
-data Match    = Exact Value
-              | Ternary Integer Integer  -- value and mask
-              | NoMatch
-  deriving (Show, Eq, Ord)
-
-data Value    = Addr  Integer
-              | Etype EthType
-              | VBool Bool
-              | VInt  Int
-  deriving (Eq, Ord)
-
-data EthType  = IP
-              | NMB
-  deriving (Show, Eq, Ord)
-
--- TODO: Can TH be used to eliminate this? We just want to avoid
---       printing the constructor, in each case.
-instance Show Value where
-  show (Addr n)   = show n
-  show (Etype et) = show et
-  show (VBool q)  = show q
-  show (VInt n)   = show n
-
--- | Value accessors.
-getAddr :: Value -> Maybe Integer
-getAddr (Addr n) = Just n
-getAddr _        = Nothing
-
-getEtype :: Value -> Maybe EthType
-getEtype (Etype et) = Just et
-getEtype _          = Nothing
-
-getVBool :: Value -> Maybe Bool
-getVBool (VBool q) = Just q
-getVBool _         = Nothing
-
-getVInt :: Value -> Maybe Int
-getVInt (VInt n) = Just n
-getVInt _        = Nothing
-
 -- | Actions
---
--- TODO: Understand why this had to be moved above the *Pkt* definition,
---       when I introduced lenses and their associated TH splice, below.
---       (Moving the code back to its original location, below the TH
---       splice, yields and "undefined constructor: Action" error, at
---       line 74(ish).)
 data Action = Noop
             | Drop
             | Modify Field Value
   deriving (Eq)
 
--- | Packet abstraction.
---
--- Note: The "_" prefix in the field names is required by *Control.Lens*,
---       to make the Template Haskell splice, below, work.
---
--- TODO: There's an awkward 1:1 correspondence between the fields of
---       the *Pkt* type and the value constructors of the *Field* type.
---       Can anything be done to make this more elegant? (TH?)
-data Pkt = Pkt
-  { -- meta-data
-    _inPort  :: Value
-  , _outPort :: Value
-  , _vlanId  :: Value
-  , _dropped :: Value
-    -- header
-  , _srcAddr :: Value
-  , _dstAddr :: Value
-  , _eType   :: Value
-    -- payload
-  , _pyldSize :: Value     -- For now, just note the size of the payload.
-  } deriving (Eq)
+data Match    = Exact Value
+              | Ternary Integer Integer  -- value and mask
+              | NoMatch
+  deriving (Show, Eq, Ord)
 
--- This TH splice builds lenses for all fields in *Pkt* automatically.
+-- | Template Haskell based automatic lens building.
+--
+-- Note: This only works, because the field accessor names for both
+--       types: *Pkt* and *SwitchState*, have been prefixed with an
+--       underscore.
 $(makeLenses ''Pkt)
 $(makeLenses ''SwitchState)
-
-instance Show Pkt where
-  show p =
-    "Packet:\n" ++
-    "\tIn port:\t\t"            ++ show (_inPort p)   ++ "\n" ++
-    "\tOut port:\t\t"           ++ show (_outPort p)  ++ "\n" ++
-    "\tVLAN ID:\t\t"            ++ show (_vlanId p)   ++ "\n" ++
-    "\tDropped:\t\t"            ++ show (_dropped p)  ++ "\n" ++
-    "\tSource MAC Addr:\t"      ++ show (_srcAddr p)  ++ "\n" ++
-    "\tDestination MAC Addr:\t" ++ show (_dstAddr p)  ++ "\n" ++
-    "\tEthernet type:\t\t"      ++ show (_eType p)    ++ "\n" ++
-    "\tPayload size:\t\t"       ++ show (_pyldSize p) ++ "\n"
 
 hdrFields = [FsrcAddr, FdstAddr, FeType]  -- Which fields to match on.
 
