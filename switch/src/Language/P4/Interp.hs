@@ -149,12 +149,6 @@ data EthType  = IP
 $(mkShow ''Value)
 
 $(mkFieldTypes)
-deriving instance Show Field
-deriving instance Eq   Field
-deriving instance Ord  Field
-deriving instance Show Param
-deriving instance Eq   Param
-deriving instance Ord  Param
 
 -- | Match/action table abstraction.
 data Table = Table

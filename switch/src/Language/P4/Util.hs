@@ -67,7 +67,8 @@ mkFieldTypes :: Q [Dec]
 mkFieldTypes = forM ["Field","Param"] $ \typName -> mkFieldType typName
 
 mkFieldType :: String -> Q Dec
-mkFieldType typName = dataD (cxt []) (mkName typName) [] Nothing constructors []
+mkFieldType typName = dataD (cxt []) (mkName typName) [] Nothing constructors [derivings]
   where constructors = map (flip normalC [] . mkName . (head typName :)) fldNms
         fldNms       = ["inPort", "outPort", "vlanId", "srcAddr", "dstAddr", "eType"]
+        derivings    = derivClause Nothing $ map (conT . mkName) ["Show","Eq","Ord"]
 
