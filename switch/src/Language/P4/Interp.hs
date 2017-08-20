@@ -1,5 +1,6 @@
-{-# LANGUAGE RankNTypes   #-}
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE RankNTypes         #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE ViewPatterns       #-}
 
 {-# LANGUAGE TemplateHaskell #-}
 
@@ -147,6 +148,14 @@ data EthType  = IP
 
 $(mkShow ''Value)
 
+$(mkFieldTypes)
+deriving instance Show Field
+deriving instance Eq   Field
+deriving instance Ord  Field
+deriving instance Show Param
+deriving instance Eq   Param
+deriving instance Ord  Param
+
 -- | Match/action table abstraction.
 data Table = Table
   { tableID :: Int
@@ -173,22 +182,6 @@ instance Eq TableRow where
 -- definition of the *Match* data type, below.
 instance Ord TableRow where
   compare = compare `on` fields
-
-data Field    = FinPort
-              | FoutPort
-              | FvlanId
-              | FsrcAddr
-              | FdstAddr
-              | FeType
-  deriving (Show, Eq, Ord)
-
-data Param    = PinPort
-              | PoutPort
-              | PvlanId
-              | PsrcAddr
-              | PdstAddr
-              | PeType
-  deriving (Show, Eq, Ord)
 
 -- | Actions
 data Action = Noop

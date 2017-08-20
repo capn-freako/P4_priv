@@ -16,14 +16,12 @@
 
 module Language.P4.UtilTest where
 
-import Language.P4.Util (mkShow)
+import Language.P4.Util
 
 data Dummy = Bogus    Char
            | Nonsense Int
 
 $(mkShow ''Dummy)
 
--- instance Show Dummy where
---   show (Bogus x) = show x
---   show (Nonsense x) = show x
+$(mkFieldTypes)
 

@@ -40,33 +40,6 @@ mkTest n = [| testP4 $(stringE $ show name) testRprt (Just ($(varE refPkts), $(v
 -- | (TH) Simple alternative to derived Show instances.
 --
 -- Just omits the data constructor.
---
--- Some useful (?) stuff:
---
--- ghci> runQ [d| f a = 1 |]
--- [FunD f [Clause [VarP a_4] (NormalB (LitE (IntegerL 1))) []]]
---
--- In some rare cases you don’t need unique variable name to be generated; instead, you need to specify the exact name of variable which must be generated in output code. For these cases, there is a (pure) function mkName::String->Name. There is also corresponding helper function “dyn s = return (VarE (mkName s))”, which returns Exp representing variable with exact the given name.
---
--- summ n = summ' n [| 0 |]
--- summ' 0 code = code
--- summ' n code = [| \x -> $(summ' (n-1) [|$code+x|] ) |]
--- This definition generates lambda form with n parameters which sums up all its arguments, for example $(summ 3) -> (\x1 -> \x2 -> \x3 -> 0+x1+x2+x3). Please draw attention that
---
--- Only [p| ... |] quotation doesn’t rename variables this pattern introduces. Instead, TH provides function genpat, which generates unique pattern from the given one.
---
--- If you need to use identifiers, available at place of splicing call, use the $(dyn "str") form.
---
--- Also inside quotation brackets you can use local variables of currently executed functions. These compile-time variables are run-time constants, so on translating brackets contents TH just substitute current values of these variables as literals. So, in this case [|... x ...|] is converted to [| ... $(lift x) ... |].
---
--- ghci> :m +Language.Haskell.TH
--- ghci> runQ [| \x _ -> x |] >>= print
--- LamE [VarP x_0,WildP] (VarE x_0)
---
--- InstanceD (Maybe Overlap) Cxt Type [Dec]
---
--- Clause [Pat] Body [Dec]
---
 mkShow :: Name -> Q [Dec]
 mkShow typName = do
   t@(TyConI (DataD _ _ _ _ constructors _)) <- reify typName  -- Get all the information on the type.
@@ -87,4 +60,14 @@ simpleName nm =
         []          -> mkName s
         _:[]        -> mkName s
         _:t         -> mkName t
+
+-- | (TH) Builder for types and helper functions, which share a common
+-- set of field accessors.
+mkFieldTypes :: Q [Dec]
+mkFieldTypes = forM ["Field","Param"] $ \typName -> mkFieldType typName
+
+mkFieldType :: String -> Q Dec
+mkFieldType typName = dataD (cxt []) (mkName typName) [] Nothing constructors []
+  where constructors = map (flip normalC [] . mkName . (head typName :)) fldNms
+        fldNms       = ["inPort", "outPort", "vlanId", "srcAddr", "dstAddr", "eType"]
 
