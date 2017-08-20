@@ -218,16 +218,7 @@ hdrFields = [FsrcAddr, FdstAddr, FeType]  -- Which fields to match on.
 -- implementation details.
 mkPkt :: (Int, Integer , Integer, EthType, Int) -> Pkt
 mkPkt (inP, srcA, dstA, eT, pyldSz) =
-  Pkt
-    { _inPort   = VInt inP
-    , _outPort  = VInt 0  -- undefined
-    , _vlanId   = VInt 0  -- undefined
-    , _dropped  = VBool False
-    , _srcAddr  = Addr srcA
-    , _dstAddr  = Addr dstA
-    , _eType    = Etype eT
-    , _pyldSize = VInt pyldSz
-    }
+  mkRefPkt (inP, 0, 0, False, srcA, dstA, eT, pyldSz)
 
 mkRefPkt :: (Int, Int, Int, Bool, Integer , Integer, EthType, Int) -> Pkt
 mkRefPkt (inP, outP, vID, drpd, srcA, dstA, eT, pyldSz) =
