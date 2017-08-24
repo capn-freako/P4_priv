@@ -16,6 +16,7 @@ import Data.Map.Strict (fromList)
 import Text.Printf
 import Language.P4.Interp
 import Language.P4.Util
+import Language.P4.Arch
 
 main :: IO ()
 main = sequence_ $
@@ -111,7 +112,6 @@ tblRemap83 = mkTable
   ( 1
   , [ FdstAddr ]
   , [ PoutPort ]
-  -- , [ ( 0, [Exact $ Addr 83], [VInt 255], [Modify FoutPort PoutPort] )
   , [ ( 0, [Exact $ Addr 83], [VInt 255], [Modify FoutPort (VInt 255)] )
     ]
   )
@@ -227,7 +227,7 @@ test3Pkts = test2Pkts
 ref3Pkts  = ref2Pkts
 ref3State = ref2State
 
--- - test #4
+-- - test #4  -- Expecting failure; want to verify pretty printing of final switch state.
 test4Script = test3Script
 test4Pkts   = test2Pkts
 ref4Pkts    = ref2Pkts

@@ -68,11 +68,6 @@ type Switch = [Pkt] -> SwitchState -> ([Pkt], SwitchState)
 --
 -- Note: The "_" prefix in the field names is required by *Control.Lens*,
 --       to make the Template Haskell splice, below, work.
---
--- TODO: There's an awkward 1:1 correspondence between the fields of
---       the *Pkt* type and the value constructors of both the *Field*
---       and *Param* types.
---       Can anything be done to make this more elegant? (TH?)
 data Pkt = Pkt
   { -- meta-data
     _inPort  :: Value
@@ -88,16 +83,18 @@ data Pkt = Pkt
   } deriving (Eq)
 
 instance Show Pkt where
-  show p =
-    "Packet:\n" ++
-    "\tIn port:\t\t"            ++ show (_inPort p)   ++ "\n" ++
-    "\tOut port:\t\t"           ++ show (_outPort p)  ++ "\n" ++
-    "\tVLAN ID:\t\t"            ++ show (_vlanId p)   ++ "\n" ++
-    "\tDropped:\t\t"            ++ show (_dropped p)  ++ "\n" ++
-    "\tSource MAC Addr:\t"      ++ show (_srcAddr p)  ++ "\n" ++
-    "\tDestination MAC Addr:\t" ++ show (_dstAddr p)  ++ "\n" ++
-    "\tEthernet type:\t\t"      ++ show (_eType p)    ++ "\n" ++
-    "\tPayload size:\t\t"       ++ show (_pyldSize p) ++ "\n"
+  show p = unlines
+    [
+      "Packet:"
+    , "\tIn port:\t\t"            ++ show (_inPort p)
+    , "\tOut port:\t\t"           ++ show (_outPort p)
+    , "\tVLAN ID:\t\t"            ++ show (_vlanId p)
+    , "\tDropped:\t\t"            ++ show (_dropped p)
+    , "\tSource MAC Addr:\t"      ++ show (_srcAddr p)
+    , "\tDestination MAC Addr:\t" ++ show (_dstAddr p)
+    , "\tEthernet type:\t\t"      ++ show (_eType p)
+    , "\tPayload size:\t\t"       ++ show (_pyldSize p)
+    ]
 
 data SwitchState = SwitchState
   { _pktsLost    :: Integer
@@ -148,7 +145,7 @@ data EthType  = IP
 
 $(mkShow ''Value)
 
-$(mkFieldTypes)
+$(mkFieldTypes)  -- Makes the *Field* and *Param* types.
 
 -- | Match/action table abstraction.
 data Table = Table

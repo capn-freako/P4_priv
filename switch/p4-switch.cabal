@@ -21,11 +21,13 @@ library
   hs-source-dirs:      src
   exposed-modules:     Language.P4.Interp
                        Language.P4.Util
+                       Language.P4.Arch
   build-depends:       base >= 4.7 && < 5
                      , mtl
                      , containers
                      , lens
                      , template-haskell
+                     , array
   default-language:    Haskell2010
 
 test-suite switch-examples
