@@ -1,6 +1,6 @@
 -- To run:
 --
---   stack build :switch-examples
+--   stack build :tst-arch
 --
 -- You might also want to use stack's --file-watch flag for automatic recompilation.
 
@@ -14,17 +14,14 @@ module Main where
 
 import Data.Map.Strict (fromList)
 import Text.Printf
-import Language.P4.Interp
-import Language.P4.Util
 import Language.P4.Arch
 
 main :: IO ()
 main = sequence_ $
-  [ putChar '\n' -- return ()
-  , testP4 "dummy"  dummyRprt  Nothing                      (mkInterp dummyScript)  []         initState
-  , testP4 "simple" simpleRprt Nothing                      (mkInterp simpleScript) simplePkts initState
-  , testP4 "test"   testRprt   (Just (refPkts,  refState))  (mkInterp simpleScript) simplePkts initState
-  ] ++ $(mkTests 4)  -- Bump the number, if you add more tests, below.
+  [ putStrLn ""
+  , testP4 "simple" simpleRprt Nothing                      (mkArch simpleScript) simplePkts initState
+  -- , testP4 "test"   testRprt   (Just (refPkts,  refState))  (mkInterp simpleScript) simplePkts initState
+  ] -- ++ $(mkTests 4)  -- Bump the number, if you add more tests, below.
 
 {--------------------------------------------------------------------
     Testing utilities
@@ -33,11 +30,11 @@ main = sequence_ $
 testP4 :: String ->                      -- test name
           ( String ->                      -- test name
             Maybe ([Pkt], SwitchState) ->  -- optional validation reference
-            ([Pkt], SwitchState) ->        -- processed packets & final switch state
+            ([Maybe Pkt], SwitchState) ->  -- processed packets & final switch state
             IO ()
           ) ->                           -- reporting/validation function
           Maybe ([Pkt], SwitchState) ->  -- optional validation reference
-          P4Interp ->                    -- DUT
+          P4Arch ->                      -- DUT
           [Pkt] -> SwitchState ->        -- test packets & initial switch state
           IO ()
 testP4 nm rprt ref dut pkts st = rprt nm ref $ runP4 dut pkts st
