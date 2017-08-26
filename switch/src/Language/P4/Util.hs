@@ -93,15 +93,17 @@ match tbl pkt | Just row <- safeHead (sort matchingRows) = (actions row, True)
 -- implementation details.
 mkPkt :: (Int, Integer , Integer, EthType, Int) -> Pkt
 mkPkt (inP, srcA, dstA, eT, pyldSz) =
-  mkRefPkt (inP, 0, 0, False, srcA, dstA, eT, pyldSz)
+  mkRefPkt (inP, 0, 0, False, 0, 0, srcA, dstA, eT, pyldSz)
 
-mkRefPkt :: (Int, Int, Int, Bool, Integer , Integer, EthType, Int) -> Pkt
-mkRefPkt (inP, outP, vID, drpd, srcA, dstA, eT, pyldSz) =
+mkRefPkt :: (Int, Int, Int, Bool, Int, Int, Integer , Integer, EthType, Int) -> Pkt
+mkRefPkt (inP, outP, vID, drpd, inT, outT, srcA, dstA, eT, pyldSz) =
   Pkt
     { _inPort   = VInt inP
     , _outPort  = VInt outP
     , _vlanId   = VInt vID
     , _dropped  = VBool drpd
+    , _inTime   = VInt inT
+    , _outTime  = VInt outT
     , _srcAddr  = Addr srcA
     , _dstAddr  = Addr dstA
     , _eType    = Etype eT

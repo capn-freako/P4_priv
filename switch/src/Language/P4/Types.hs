@@ -35,6 +35,8 @@ data Pkt = Pkt
   , _outPort :: Value
   , _vlanId  :: Value
   , _dropped :: Value
+  , _inTime  :: Value
+  , _outTime :: Value
     -- header
   , _srcAddr :: Value
   , _dstAddr :: Value
@@ -51,6 +53,8 @@ instance Show Pkt where
     , "\tOut port:\t\t"           ++ show (_outPort p)
     , "\tVLAN ID:\t\t"            ++ show (_vlanId p)
     , "\tDropped:\t\t"            ++ show (_dropped p)
+    , "\tInput time:\t\t"         ++ show (_inTime p)
+    , "\tOutput time:\t\t"        ++ show (_outTime p)
     , "\tSource MAC Addr:\t"      ++ show (_srcAddr p)
     , "\tDestination MAC Addr:\t" ++ show (_dstAddr p)
     , "\tEthernet type:\t\t"      ++ show (_eType p)

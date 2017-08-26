@@ -4,8 +4,6 @@
 --
 -- You might also want to use stack's --file-watch flag for automatic recompilation.
 
-{-# LANGUAGE TemplateHaskell #-}
-
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
@@ -17,7 +15,7 @@ import Text.Printf
 import Language.P4.Arch
 
 main :: IO ()
-main = sequence_ $
+main = sequence_
   [ putStrLn ""
   , testP4 "simple" simpleRprt Nothing                      (mkArch simpleScript) simplePkts initState
   -- , testP4 "test"   testRprt   (Just (refPkts,  refState))  (mkInterp simpleScript) simplePkts initState
@@ -69,15 +67,15 @@ testRprt nm (Just (rPkts, rState)) (outPkts, outState) =
      putStrLn $ "Packet comparison results: " ++
        if outPkts == rPkts then "All match."
                           else partialPktMatchStr
-  where partialPktMatchStr = printf "%3d %% match." $ ((round $ 100 * matchRatio)::Int)
+  where partialPktMatchStr = printf "%3d %% match." ((round $ 100 * matchRatio)::Int)
         matchRatio         = ( fromIntegral (length (filter (uncurry (==)) $ zip rPkts outPkts)) /
-                               (fromIntegral $ length outPkts)
+                               fromIntegral (length outPkts)
                              ) :: Float
         stateFailStr       =
           unlines
             [ "FAIL\n"
-            , "Expected:\n" ++ (show rState)
-            , "Got:\n"      ++ (show outState)
+            , "Expected:\n" ++ show rState
+            , "Got:\n"      ++ show outState
             ]
 
 -- Example P4 Scripts.
@@ -116,14 +114,17 @@ tblRemap83 = mkTable
 -- Example packet lists (input & reference).
 simplePkts = map mkPkt
   --  inP    srcAd     dstAd      eT       pyldSz
-  [ (  1,       82,       83,     IP,          10 )
-  , (  2,       83,       82,    NMB,          10 )
+  [ (  1,       81,       82,     IP,          10 )
+  , (  2,       82,       81,    NMB,          10 )
+  , (  2,       82,       81,    NMB,           0 )
+  , (  2,       82,       81,    NMB,           0 )
+  , (  2,       82,       81,    NMB,           0 )
   ]
 
 refPkts = map mkRefPkt
-  --  inP    outP  vlanID dropped           srcAd           dstAd      eT  pyldSz
-  [ (   1,      0,      0,  False,             82,             83,     IP,     10 )
-  , (   2,      1,      0,   True,             83,             82,    NMB,     10 )
+  --  inP    outP  vlanID dropped  inTime outTime           srcAd           dstAd      eT  pyldSz
+  [ (   1,      0,      0,  False,      0,      0,             82,             83,     IP,     10 )
+  , (   2,      1,      0,   True,      0,      0,             83,             82,    NMB,     10 )
   ]
 
 -- Example reference final switch state definition.
@@ -154,17 +155,17 @@ test1Pkts = map mkPkt
   ]
 
 ref1Pkts = map mkRefPkt
-  --  inP    outP  vlanID dropped           srcAd           dstAd      eT  pyldSz
-  [ (   1,      0,      0,  False,             81,             82,     IP,     10 )
-  , (   2,      1,      0,   True,             82,             81,    NMB,     10 )
-  , (   1,      0,      0,  False,             81,             83,     IP,     20 )
-  , (   3,      1,      0,   True,             83,             81,    NMB,     10 )
-  , (   3,      2,      0,  False,             83,             82,     IP,    100 )
-  , (   4,      3,      0,   True,             83,             83,    NMB,     10 )
-  , (   4,      4,      0,  False,             84,             83,     IP,     10 )
-  , (   3,      0,      0,   True,             83,             85,    NMB,     10 )
-  , (   4,      3,      0,   True,             84,             83,    NMB,     10 )
-  , (   3,      4,      0,  False,             83,             84,     IP,     10 )
+  --  inP    outP  vlanID dropped  inTime outTime           srcAd           dstAd      eT  pyldSz
+  [ (   1,      0,      0,  False,      0,      0,             81,             82,     IP,     10 )
+  , (   2,      1,      0,   True,      0,      0,             82,             81,    NMB,     10 )
+  , (   1,      0,      0,  False,      0,      0,             81,             83,     IP,     20 )
+  , (   3,      1,      0,   True,      0,      0,             83,             81,    NMB,     10 )
+  , (   3,      2,      0,  False,      0,      0,             83,             82,     IP,    100 )
+  , (   4,      3,      0,   True,      0,      0,             83,             83,    NMB,     10 )
+  , (   4,      4,      0,  False,      0,      0,             84,             83,     IP,     10 )
+  , (   3,      0,      0,   True,      0,      0,             83,             85,    NMB,     10 )
+  , (   4,      3,      0,   True,      0,      0,             84,             83,    NMB,     10 )
+  , (   3,      4,      0,  False,      0,      0,             83,             84,     IP,     10 )
   ]
 
 ref1State = initSwitchState
@@ -188,17 +189,17 @@ test2Script = P4Script
 test2Pkts = test1Pkts
 
 ref2Pkts = map mkRefPkt
-  --  inP    outP  vlanID dropped           srcAd           dstAd      eT  pyldSz
-  [ (   1,      0,      0,  False,             81,             82,     IP,     10 )
-  , (   2,      1,      0,   True,             82,             81,    NMB,     10 )
-  , (   1,    255,      0,  False,             81,             83,     IP,     20 )
-  , (   3,      1,      0,   True,             83,             81,    NMB,     10 )
-  , (   3,      2,      0,  False,             83,             82,     IP,    100 )
-  , (   4,    255,      0,   True,             83,             83,    NMB,     10 )
-  , (   4,    255,      0,  False,             84,             83,     IP,     10 )
-  , (   3,      0,      0,   True,             83,             85,    NMB,     10 )
-  , (   4,    255,      0,   True,             84,             83,    NMB,     10 )
-  , (   3,      4,      0,  False,             83,             84,     IP,     10 )
+  --  inP    outP  vlanID dropped  inTime outTime           srcAd           dstAd      eT  pyldSz
+  [ (   1,      0,      0,  False,      0,      0,             81,             82,     IP,     10 )
+  , (   2,      1,      0,   True,      0,      0,             82,             81,    NMB,     10 )
+  , (   1,    255,      0,  False,      0,      0,             81,             83,     IP,     20 )
+  , (   3,      1,      0,   True,      0,      0,             83,             81,    NMB,     10 )
+  , (   3,      2,      0,  False,      0,      0,             83,             82,     IP,    100 )
+  , (   4,    255,      0,   True,      0,      0,             83,             83,    NMB,     10 )
+  , (   4,    255,      0,  False,      0,      0,             84,             83,     IP,     10 )
+  , (   3,      0,      0,   True,      0,      0,             83,             85,    NMB,     10 )
+  , (   4,    255,      0,   True,      0,      0,             84,             83,    NMB,     10 )
+  , (   3,      4,      0,  False,      0,      0,             83,             84,     IP,     10 )
   ]
 
 ref2State = initSwitchState

@@ -1,8 +1,4 @@
 {-# LANGUAGE RankNTypes         #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE ViewPatterns       #-}
-
-{-# LANGUAGE TemplateHaskell #-}
 
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
@@ -74,87 +70,72 @@ mkArch script = P4Arch $ runState . traverse (stepSwitch (ingress script, egStmt
 -- packet list.
 -- TODO: Change this, to support simultaneous arrival of packets at
 --       multiple ports.
+--
+-- Note: The apparently backwards nature of the monadic processing,
+--       below, is necessary to correctly model the flow of packets
+--       through the switch, with proper cycle counting. If we did this
+--       in the more intuitive straightforward fashion, a packet could
+--       get through the switch with zero latency, which isn't
+--       realistic.
 stepSwitch :: ([Statement], [Statement]) -> Pkt -> State SwitchState (Maybe Pkt)
 stepSwitch (ingStmts, egStmts) pkt =
   do s <- get
-         -- Push the next input packet into its associated port's ingress FIFO.
-     let s'  = over ingressBufs ( \ar -> ar // [(inPortNum, push pkt (ar A.! inPortNum))] ) s
-         -- Attempt to pop next available input packet, for ingress MAU processing.
-         res = nextInPkt s'
-         -- If successful then process that packet using the ingress statements,
-         -- and move to traffic memory (TM).
-         s'' | Just (p, ss) <- res = let (p', ss') = runState (procPkt ingStmts p) ss
-                                      in over trafficMem (push p') ss'
-             | otherwise           = s'
+         -- Attempt to pop next outgoing packet from an egress FIFO.
+     let res'' = nextPktAry s egressBufs
+         -- Setup return values, base on our popping attempt.
+         (pkt', s') | Just (p, ss) <- res'' = (Just (set outTime (VInt $ view cycleCount ss) p),  ss)
+                    | otherwise             = (Nothing, s)
          -- Attempt to pop a packet from TM for processing by egress MAU.
-         res' = nextPkt s''
+         res' = nextPkt s' trafficMem
          -- If successful then process that packet using the egress statements,
          -- and move to the appropriate port's egress buffer.
-         s''' | Just (p, ss) <- res' =
-                   let (p', ss')     = runState (procPkt egStmts p) ss
-                       outPortNum    = getVInt $ view outPort p'
-                       outBufArray   = _egressBufs ss'
-                    in ss' { _egressBufs =
-                               outBufArray //
-                                 [(outPortNum, push p' (outBufArray A.! outPortNum))] }
-                    -- in if outPortNum /= 0
-                    --       then ss' { _egressBufs =
-                    --                    outBufArray //
-                    --                      [(outPortNum, push p' (outBufArray A.! outPortNum))] }
-                    --       else ss'
-              | otherwise            = s''
-         -- Attempt to pop next outgoing packet from an egress FIFO.
-         res'' = nextOutPkt s'''
-         -- If successful then return the popped packet.
-         (pkt', s'''') | Just (p, ss) <- res'' = (Just p,  ss)
-                       | otherwise             = (Nothing, s''')
-     put s''''
+         s'' | Just (p, ss) <- res' =
+                 let (p', ss')     = runState (procPkt egStmts p) ss
+                     outPortNum    = getVInt $ view outPort p'
+                     outBufArray   = _egressBufs ss'
+                  in ss' { _egressBufs =
+                             outBufArray //
+                               [(outPortNum, push p' (outBufArray A.! outPortNum))] }
+             | otherwise            = s'
+         -- Attempt to pop next available input packet, for ingress MAU processing.
+         res = nextPktAry s'' ingressBufs
+         -- If successful then process that packet using the ingress statements,
+         -- and move to traffic memory (TM).
+         s''' | Just (p, ss) <- res = let (p', ss') = runState (procPkt ingStmts p) ss
+                                       in over trafficMem (push p') ss'
+              | otherwise           = s''
+         -- Push the next input packet into its associated port's ingress FIFO.
+         pkt'' = set inTime (VInt $ view cycleCount s) pkt
+         s'''' = over ingressBufs ( \ar -> ar // [(inPortNum, push pkt'' (ar A.! inPortNum))] ) s'''
+     put $ over cycleCount (+ 1) s''''
      return pkt'
+ where inPortNum = getVInt $ view inPort pkt
 
-
- where inPortNum  = getVInt $ view inPort  pkt
-
--- | Scan the ports for new input packets, in order, returning the first one found.
-nextInPkt :: SwitchState -> Maybe (Pkt, SwitchState)
-nextInPkt s =
+-- | Try to pop a packet from an array of FIFOs.
+--
+-- Return immediately upon success.
+-- Attempt each FIFO in the array, at most, once.
+nextPktAry :: SwitchState -> Lens' SwitchState (Array Int (Fifo Pkt)) -> Maybe (Pkt, SwitchState)
+nextPktAry s l =
   do let loop nxt = do
-           let (p, f) = pop $ _ingressBufs s A.! nxt
+           let (p, f) = pop ((s ^. l) A.! nxt)
            case p of
-             Just p' -> Just ( p', s { _ingressBufs = _ingressBufs s // [(nxt, f)]
-                                     , _nextInPort  = bumpPortNum nxt } )
-             _       -> if nxt == prev then Nothing
-                                       else loop (nxt + 1)
-     loop next
-       where first         = fst inBufAryBnds
-             lst           = snd inBufAryBnds
-             inBufAryBnds  = (bounds . _ingressBufs) s
-             next          = _nextInPort s
-             prev          = if next == first then lst
-                                              else next - 1
-             bumpPortNum n = if n == lst then first
-                                         else n + 1
-
--- | Scan the ports for an output packet waiting to exit.
-nextOutPkt :: SwitchState -> Maybe (Pkt, SwitchState)
-nextOutPkt s =
-  do let loop nxt = do
-           let (p, f) = pop $ _egressBufs s A.! nxt
-           case p of
-             Just p' -> Just ( p', s { _egressBufs = _egressBufs s // [(nxt, f)] } )
+             Just p' -> Just ( p', s & l %~ (// [(nxt, f)]))
              _       -> if nxt == lst then Nothing
                                       else loop (nxt + 1)
      loop first
-       where first       = fst arrayBounds
-             lst         = snd arrayBounds
-             arrayBounds = (bounds . _egressBufs) s
+ where first       = fst arrayBounds
+       lst         = snd arrayBounds
+       arrayBounds = bounds $ s ^. l
 
--- | Get the next packet waiting in traffic memory, if available.
+
+-- | Attempt to pop a packet from a FIFO, using a lens into SwitchState.
 --
 -- TODO: Add priority selection.
-nextPkt :: SwitchState -> Maybe (Pkt, SwitchState)
-nextPkt s =
-  do let (p, f) = pop (_trafficMem s)
+nextPkt :: SwitchState -> Lens' SwitchState (Fifo Pkt) -> Maybe (Pkt, SwitchState)
+nextPkt s l =
+  do let (p, f) = pop (s ^. l)
      case p of
-       Just p' -> Just (p', s { _trafficMem = f })
+       Just p' -> Just ( p', s & l .~ f )
        _       -> Nothing
 
