@@ -14,7 +14,8 @@
 
 module Language.P4.Types where
 
-import Control.Lens hiding (Empty)
+import Prelude hiding (length)
+import Control.Lens hiding (Empty, (<|))
 import Data.Array hiding ((!))
 import qualified Data.Array as A
 import Data.Function (on)
@@ -24,6 +25,23 @@ import Data.Sequence hiding (zip, fromList, adjust, sort, filter)
 import Data.Tuple (swap)
 
 import Language.P4.TH
+
+-- | FIFO abstraction.
+data Fifo a = Fifo
+  { _getData :: Seq a
+  , _maxLen  :: Int
+  } deriving (Eq)
+
+$(makeLenses ''Fifo)
+
+push :: a -> Fifo a -> Fifo a
+push x f = f' & maxLen .~ l
+  where f' = f & getData %~ (x <|)
+        l  = max (f' ^. maxLen) (length $ f' ^. getData)
+
+pop :: Fifo a -> (Maybe a, Fifo a)
+pop f | f' :|> x <- f ^. getData = (Just x,  f & getData .~ f')
+      | otherwise                = (Nothing, f)
 
 -- | Packet abstraction.
 --
@@ -92,7 +110,7 @@ instance Show SwitchState where
 gNumPorts = 16
 ns        = [1..gNumPorts]
 initMapList = [ ( VInt n, Addr (80 + fromIntegral n) ) | n <- ns ]
-initBuf   = array (1, gNumPorts) [(n, Empty) | n <- [1..gNumPorts]]
+initBuf   = array (1, gNumPorts) [(n, Fifo Empty 0) | n <- [1..gNumPorts]]
 initSwitchState = SwitchState
   { _pktsLost    = 0
   , _pktsDropped = 0
@@ -104,18 +122,8 @@ initSwitchState = SwitchState
   , _egressBufs  = initBuf
   , _cycleCount  = 0
   , _nextInPort  = 1
-  , _trafficMem  = Empty
+  , _trafficMem  = Fifo Empty 0
   }
-
--- | FIFO abstraction.
-type Fifo a = Seq a
-
-push :: a -> Fifo a -> Fifo a
-push = (:<|)
-
-pop :: Fifo a -> (Maybe a, Fifo a)
-pop f | f' :|> x <- f = (Just x,  f')
-      | otherwise     = (Nothing, f)
 
 -- | Polymorphic value type, used throughout.
 --
