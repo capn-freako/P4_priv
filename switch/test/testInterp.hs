@@ -70,15 +70,15 @@ testRprt nm (Just (rPkts, rState)) (outPkts, outState) =
      putStrLn $ "Packet comparison results: " ++
        if outPkts == rPkts then "All match."
                           else partialPktMatchStr
-  where partialPktMatchStr = printf "%3d %% match." $ ((round $ 100 * matchRatio)::Int)
+  where partialPktMatchStr = printf "%3d %% match." ((round $ 100 * matchRatio)::Int)
         matchRatio         = ( fromIntegral (length (filter (uncurry (==)) $ zip rPkts outPkts)) /
-                               (fromIntegral $ length outPkts)
+                               fromIntegral (length outPkts)
                              ) :: Float
         stateFailStr       =
           unlines
             [ "FAIL\n"
-            , "Expected:\n" ++ (show rState)
-            , "Got:\n"      ++ (show outState)
+            , "Expected:\n" ++ show rState
+            , "Got:\n"      ++ show outState
             ]
 
 -- Example P4 Scripts.

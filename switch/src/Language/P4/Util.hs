@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE RankNTypes      #-}
 
 ----------------------------------------------------------------------
@@ -31,48 +30,11 @@ safeHead :: [a] -> Maybe a
 safeHead []    = Nothing
 safeHead (x:_) = Just x
 
-procPkt :: [Statement] -> Pkt -> State SwitchState Pkt
-procPkt stmts pkt = foldl (>>=) (return pkt) (map app $ concatMap mkOps stmts)  -- TODO: combine map & concatMap?
-  where app f = \p ->
-          do s <- get
-             let (p', s') = f (p, s)
-             put s'
-             return p'
-
-mkOps :: Statement -> [Unop (Pkt, SwitchState)]
-mkOps (Apply tbl hit miss) = [applyTbl tbl hit miss]
-mkOps (If e s1 s2)         = mkOps $ if evalExpr e then s1 else s2
-mkOps (User stmts)         = concatMap mkOps stmts
-
 -- | Evaluate an Boolean expression.
 --
 -- TODO: Complete this.
 evalExpr :: Expr -> Bool
 evalExpr _ = True
-
--- | Apply a single table to a packet.
---
--- TODO: Flag changes in MAC addresses of already mapped ports.
---       Flag duplicate MAC addresses from different ports.
-applyTbl :: Table -> [Action] -> [Action] -> Unop (Pkt, SwitchState)
-applyTbl tbl hit miss (pkt, st) = (pkt', st')
-  where pkt' = foldl (.) id (map actionToFunc allActions) pkt''
-        pkt'' | Just v <- Map.lookup (_dstAddr pkt) (_addrPortMap st) = set outPort v pkt
-              | otherwise                                             = pkt
-        st'         = if Drop `elem` allActions then over pktsDropped (+ 1) st''
-                                           else st''
-        st''        = if matched           then over pktsMatched (+ 1) st'''
-                                           else st'''
-        st'''       = if matched           then over tblHits (bump $ tableID tbl) st''''
-                                           else st''''
-        st''''      = over portAddrMap (Map.insert (_inPort  pkt) (_srcAddr pkt)) st'''''
-        st'''''     = over addrPortMap (Map.insert (_srcAddr pkt) (_inPort pkt))  st
-        allActions          = mActions ++ extras
-        (mActions, matched) = match tbl pkt
-        extras | matched    = hit
-               | otherwise  = miss
-        bump k m            = if k `member` m then adjust     (+ 1) k m
-                                              else Map.insert k     1 m
 
 actionToFunc :: Action -> Unop Pkt
 actionToFunc a = case a of
@@ -81,10 +43,15 @@ actionToFunc a = case a of
   Modify fld val -> set (fieldToLens fld) val
 
 -- | Attempt to match a packet, using a single table.
-match :: Table -> Pkt -> ([Action], Bool)
-match tbl pkt | Just row <- safeHead (sort matchingRows) = (actions row, True)
-              | otherwise                                = ([],          False)
+match :: Table -> Pkt -> ([Action], Bool, Pkt)
+match tbl pkt | Just row <- safeHead (sort matchingRows) = (actions row, True,  pkt & tableHits %~ ((tableID tbl, rowID row) :))
+              | otherwise                                = ([],          False, pkt)
   where matchingRows = filter (rowMatch pkt) $ rows tbl
+
+-- | Row matching
+rowMatch :: Pkt -> TableRow -> Bool
+rowMatch pkt row = and
+  [matchVal (fields row ! fld) (acc pkt) | (fld, acc) <- zip hdrFields $ map (view . fieldToLens) hdrFields]
 
 -- | Exported packet builder.
 --
@@ -93,10 +60,26 @@ match tbl pkt | Just row <- safeHead (sort matchingRows) = (actions row, True)
 -- implementation details.
 mkPkt :: (Int, Integer , Integer, EthType, Int) -> Pkt
 mkPkt (inP, srcA, dstA, eT, pyldSz) =
-  mkRefPkt (inP, 0, 0, False, 0, 0, srcA, dstA, eT, pyldSz)
+  mkRefPkt (inP, 0, 0, False, srcA, dstA, eT, pyldSz)
 
-mkRefPkt :: (Int, Int, Int, Bool, Int, Int, Integer , Integer, EthType, Int) -> Pkt
-mkRefPkt (inP, outP, vID, drpd, inT, outT, srcA, dstA, eT, pyldSz) =
+mkRefPkt :: (Int, Int, Int, Bool, Integer , Integer, EthType, Int) -> Pkt
+mkRefPkt (inP, outP, vID, drpd, srcA, dstA, eT, pyldSz) =
+  Pkt
+    { _inPort   = VInt inP
+    , _outPort  = VInt outP
+    , _vlanId   = VInt vID
+    , _dropped  = VBool drpd
+    , _inTime   = VInt 0
+    , _outTime  = VInt 0
+    , _tableHits = []
+    , _srcAddr  = Addr srcA
+    , _dstAddr  = Addr dstA
+    , _eType    = Etype eT
+    , _pyldSize = VInt pyldSz
+    }
+
+mkRefPkt2 :: (Int, Int, Int, Bool, Int, Int, Integer , Integer, EthType, Int) -> Pkt
+mkRefPkt2 (inP, outP, vID, drpd, inT, outT, srcA, dstA, eT, pyldSz) =
   Pkt
     { _inPort   = VInt inP
     , _outPort  = VInt outP
@@ -104,6 +87,7 @@ mkRefPkt (inP, outP, vID, drpd, inT, outT, srcA, dstA, eT, pyldSz) =
     , _dropped  = VBool drpd
     , _inTime   = VInt inT
     , _outTime  = VInt outT
+    , _tableHits = []
     , _srcAddr  = Addr srcA
     , _dstAddr  = Addr dstA
     , _eType    = Etype eT
@@ -128,11 +112,6 @@ mkRow flds parms (rID, matches, pVals, acts) =
     }
   where fillMissingFields m = foldl addIfMissing m hdrFields
         addIfMissing m f    = if f `member` m then m else Map.insert f NoMatch m
-
--- | Row matching
-rowMatch :: Pkt -> TableRow -> Bool
-rowMatch pkt row = and
-  [matchVal (fields row ! fld) (acc pkt) | (fld, acc) <- zip hdrFields $ map (view . fieldToLens) hdrFields]
 
 matchVal :: Match -> Value -> Bool
 matchVal NoMatch       _                = True

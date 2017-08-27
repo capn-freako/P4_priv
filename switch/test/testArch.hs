@@ -121,7 +121,7 @@ simplePkts = map mkPkt
   , (  2,       82,       81,    NMB,           0 )
   ]
 
-refPkts = map mkRefPkt
+refPkts = map mkRefPkt2
   --  inP    outP  vlanID dropped  inTime outTime           srcAd           dstAd      eT  pyldSz
   [ (   1,      0,      0,  False,      0,      0,             82,             83,     IP,     10 )
   , (   2,      1,      0,   True,      0,      0,             83,             82,    NMB,     10 )
@@ -154,7 +154,7 @@ test1Pkts = map mkPkt
   , (  3,       83,       84,     IP,          10 )
   ]
 
-ref1Pkts = map mkRefPkt
+ref1Pkts = map mkRefPkt2
   --  inP    outP  vlanID dropped  inTime outTime           srcAd           dstAd      eT  pyldSz
   [ (   1,      0,      0,  False,      0,      0,             81,             82,     IP,     10 )
   , (   2,      1,      0,   True,      0,      0,             82,             81,    NMB,     10 )
@@ -188,7 +188,7 @@ test2Script = P4Script
 
 test2Pkts = test1Pkts
 
-ref2Pkts = map mkRefPkt
+ref2Pkts = map mkRefPkt2
   --  inP    outP  vlanID dropped  inTime outTime           srcAd           dstAd      eT  pyldSz
   [ (   1,      0,      0,  False,      0,      0,             81,             82,     IP,     10 )
   , (   2,      1,      0,   True,      0,      0,             82,             81,    NMB,     10 )

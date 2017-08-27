@@ -55,6 +55,7 @@ data Pkt = Pkt
   , _dropped :: Value
   , _inTime  :: Value
   , _outTime :: Value
+  , _tableHits :: [(Int, Int)]  -- Table ID, Row ID
     -- header
   , _srcAddr :: Value
   , _dstAddr :: Value
@@ -73,57 +74,12 @@ instance Show Pkt where
     , "\tDropped:\t\t"            ++ show (_dropped p)
     , "\tInput time:\t\t"         ++ show (_inTime p)
     , "\tOutput time:\t\t"        ++ show (_outTime p)
+    , "\tTable hits:\t\t"         ++ show (_tableHits p)
     , "\tSource MAC Addr:\t"      ++ show (_srcAddr p)
     , "\tDestination MAC Addr:\t" ++ show (_dstAddr p)
     , "\tEthernet type:\t\t"      ++ show (_eType p)
     , "\tPayload size:\t\t"       ++ show (_pyldSize p)
     ]
-
-data SwitchState = SwitchState
-  { _pktsLost    :: Integer          -- Lost, due to buffer overflow.
-  , _pktsDropped :: Integer          -- Dropped, due to MAU action.
-  , _pktsMatched :: Integer
-  , _tblHits     :: Map Int   Int    -- table ID -> # hits
-  , _portAddrMap :: Map Value Value  -- port # -> MAC address
-  , _addrPortMap :: Map Value Value  -- MAC address -> port #
-  , _ingressBufs :: Array Int (Fifo Pkt)   -- one ingress buffer per port
-  , _egressBufs  :: Array Int (Fifo Pkt)   -- one egress buffer per port
-  , _cycleCount  :: Int              -- Currently, one "cycle" per packet.
-  , _nextInPort  :: Int              -- Round robin arbitration for ingress MAU.
-  , _trafficMem  :: Fifo Pkt
-  } deriving (Eq)
-
-instance Show SwitchState where
-  show ss = unlines
-    [ "Packets lost:\t\t"     ++ show (_pktsLost    ss)
-    , "Packets dropped:\t"    ++ show (_pktsDropped ss)
-    , "Packets matched:\t"    ++ show (_pktsMatched ss)
-    , "Table hits:\t\t"       ++ show (_tblHits     ss)
-    , "Port MAC addresses:\t" ++ show (_portAddrMap ss)
-    ]
-
--- | Default initial switch state.
---
--- Users can invoke this, modifying it as necessary using record syntax.
--- And this will be less fragile than having user code do the full
--- initial state creation.
-gNumPorts = 16
-ns        = [1..gNumPorts]
-initMapList = [ ( VInt n, Addr (80 + fromIntegral n) ) | n <- ns ]
-initBuf   = array (1, gNumPorts) [(n, Fifo Empty 0) | n <- [1..gNumPorts]]
-initSwitchState = SwitchState
-  { _pktsLost    = 0
-  , _pktsDropped = 0
-  , _pktsMatched = 0
-  , _tblHits     = Map.empty
-  , _portAddrMap = fromList initMapList
-  , _addrPortMap = fromList $ map swap initMapList
-  , _ingressBufs = initBuf
-  , _egressBufs  = initBuf
-  , _cycleCount  = 0
-  , _nextInPort  = 1
-  , _trafficMem  = Fifo Empty 0
-  }
 
 -- | Polymorphic value type, used throughout.
 --
@@ -192,7 +148,6 @@ data Match    = Exact Value
 --       types: *Pkt* and *SwitchState*, have been prefixed with an
 --       underscore.
 $(makeLenses ''Pkt)
-$(makeLenses ''SwitchState)
 
 hdrFields = [FsrcAddr, FdstAddr, FeType]  -- Which fields to match on.
 

@@ -37,9 +37,7 @@ test-suite tst-interp
   hs-source-dirs:      test
   main-is:             testInterp.hs
   build-depends:       base
-                     -- , mtl
                      , containers
-                     -- , lens
                      , p4-switch
   default-language:    Haskell2010
 
@@ -48,9 +46,7 @@ test-suite tst-arch
   hs-source-dirs:      test
   main-is:             testArch.hs
   build-depends:       base
-                     -- , mtl
                      , containers
-                     -- , lens
                      , p4-switch
   default-language:    Haskell2010
 
