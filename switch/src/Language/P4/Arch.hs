@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts   #-}
 {-# LANGUAGE RankNTypes         #-}
 {-# LANGUAGE TemplateHaskell    #-}
 
@@ -61,7 +62,7 @@ import Language.P4.Util
 newtype P4Arch = P4Arch { runP4 :: Switch }
 
 -- | Type definition of a configured switch.
-type Switch = [Pkt] -> SwitchState -> ([Maybe Pkt], SwitchState)
+type Switch = [[Pkt]] -> SwitchState -> ([[Pkt]], SwitchState)
 
 data SwitchState = SwitchState
   { _pktsLost    :: Integer          -- Lost, due to buffer overflow.
@@ -124,10 +125,27 @@ mkArch script = P4Arch $ runState . traverse (stepSwitch (ingress script, egStmt
 
 -- | Step the switch through one "cycle".
 --
--- Currently, a cycle is equivalent to pulling one packet from the input
--- packet list.
--- TODO: Change this, to support simultaneous arrival of packets at
---       multiple ports.
+-- Note: Currently, a "cycle" is defined as the time necessary to move
+--       one complete packet through one of the stages of the
+--       architectural switch model. These "stages" are:
+--
+--         0: From an input packet list to a port ingress buffer.
+--         1: From a port ingress buffer to traffic memory (TM), via the
+--            ingress match/action unit (MAU).
+--         2: From TM to a port egress buffer, via the egress MAU.
+--         3: From a port egress buffer to a output packet list.
+--
+--       The *inTime* and *outTime* fields of a *Pkt* instance record
+--       the input and output cycles of a packet, so that its gross
+--       latency through the switch can be quantified. Additionally,
+--       each table/row match incurred by the packet is also recorded,
+--       in the *tableHits* field, so that the latency estimate can be
+--       refined.
+--
+-- Note: The packets are assumed to arrive at the same time (to within
+--       the granularity of a cycle, at least). Therefore, you
+--       shouldn't have any duplicate input port numbers in the list of
+--       input packets.
 --
 -- Note: The apparently backwards nature of the monadic processing,
 --       below, is necessary to correctly model the flow of packets
@@ -135,14 +153,14 @@ mkArch script = P4Arch $ runState . traverse (stepSwitch (ingress script, egStmt
 --       in the more intuitive straightforward fashion, a packet could
 --       get through the switch with zero latency, which isn't
 --       realistic.
-stepSwitch :: ([Statement], [Statement]) -> Pkt -> State SwitchState (Maybe Pkt)
-stepSwitch (ingStmts, egStmts) pkt =
+stepSwitch :: ([Statement], [Statement]) -> [Pkt] -> State SwitchState [Pkt]
+stepSwitch (ingStmts, egStmts) pkts =
   do s <- get
-         -- Attempt to pop next outgoing packet from an egress FIFO.
-     let res'' = nextPktAry s egressBufs
-         -- Setup return values, base on our popping attempt.
-         (pkt', s') | Just (p, ss) <- res'' = (Just (set outTime (VInt $ view cycleCount ss) p),  ss)
-                    | otherwise             = (Nothing, s)
+         -- Pop any outgoing packets from egress FIFOs.
+     let curTime            = s ^. cycleCount
+         (eBufAry, outPkts) = nextPktAry $ _egressBufs s
+         outPkts'           = map (set outTime (VInt curTime)) outPkts
+         s'                 = s & egressBufs .~ eBufAry
          -- Attempt to pop a packet from TM for processing by egress MAU.
          res' = nextPkt s' trafficMem
          -- If successful then process that packet using the egress statements,
@@ -156,36 +174,31 @@ stepSwitch (ingStmts, egStmts) pkt =
                                [(outPortNum, push p' (outBufArray A.! outPortNum))] }
              | otherwise            = s'
          -- Attempt to pop next available input packet, for ingress MAU processing.
-         res = nextPktAry s'' ingressBufs
+         res = nextInPkt s''
          -- If successful then process that packet using the ingress statements,
          -- and move to traffic memory (TM).
          s''' | Just (p, ss) <- res = let (p', ss') = runState (procPkt ingStmts p) ss
                                        in over trafficMem (push p') ss'
               | otherwise           = s''
-         -- Push the next input packet into its associated port's ingress FIFO.
-         pkt'' = set inTime (VInt $ view cycleCount s) pkt
-         s'''' = over ingressBufs ( \ar -> ar // [(inPortNum, push pkt'' (ar A.! inPortNum))] ) s'''
+         -- Push the next group of input packets into their associated port's ingress FIFO.
+         pkts' = map (set inTime (VInt curTime)) pkts
+         s'''' = execState (traverse f pkts') s'''
+           where f p = do st <- get
+                          let inPortNum = getVInt (view inPort p)
+                          put $ over ingressBufs ( \ar -> ar // [(inPortNum, push p (ar A.! inPortNum))] ) st
+                          return ()
      put $ over cycleCount (+ 1) s''''
-     return pkt'
- where inPortNum = getVInt $ view inPort pkt
+     return outPkts'
 
--- | Try to pop a packet from an array of FIFOs.
---
--- Return immediately upon success.
--- Attempt each FIFO in the array, at most, once.
-nextPktAry :: SwitchState -> Lens' SwitchState (Array Int (Fifo Pkt)) -> Maybe (Pkt, SwitchState)
-nextPktAry s l =
-  do let loop nxt = do
-           let (p, f) = pop ((s ^. l) A.! nxt)
-           case p of
-             Just p' -> Just ( p', s & l %~ (// [(nxt, f)]))
-             _       -> if nxt == lst then Nothing
-                                      else loop (nxt + 1)
-     loop first
- where first       = fst arrayBounds
-       lst         = snd arrayBounds
-       arrayBounds = bounds $ s ^. l
-
+-- | Try to pop packets from an array of FIFOs.
+nextPktAry :: Array Int (Fifo Pkt) -> (Array Int (Fifo Pkt), [Pkt])
+nextPktAry ar = runState (traverse tryPop ar) []
+  where tryPop pktFifo = do pkts <- get
+                            let (pkt, pktFifo') = pop pktFifo
+                                pkts' | Just p <- pkt = pkts ++ [p]
+                                      | otherwise     = pkts
+                            put pkts'
+                            return pktFifo'
 
 -- | Attempt to pop a packet from a FIFO, using a lens into SwitchState.
 --
@@ -196,6 +209,26 @@ nextPkt s l =
      case p of
        Just p' -> Just ( p', s & l .~ f )
        _       -> Nothing
+
+-- | Scan the ports for new input packets, in order, returning the first one found.
+nextInPkt :: SwitchState -> Maybe (Pkt, SwitchState)
+nextInPkt s =
+  do let loop nxt = do
+           let (p, f) = pop $ _ingressBufs s A.! nxt
+           case p of
+             Just p' -> Just ( p', s { _ingressBufs = _ingressBufs s // [(nxt, f)]
+                                     , _nextInPort  = bumpPortNum nxt } )
+             _       -> if nxt == prev then Nothing
+                                       else loop (bumpPortNum nxt)
+     loop next
+       where first         = fst inBufAryBnds
+             lst           = snd inBufAryBnds
+             inBufAryBnds  = (bounds . _ingressBufs) s
+             next          = _nextInPort s
+             prev          = if next == first then lst
+                                              else next - 1
+             bumpPortNum n = if n == lst then first
+                                         else n + 1
 
 -- | Stateful processing of a single packet over a sequence of statements.
 procPkt :: [Statement] -> Pkt -> State SwitchState Pkt

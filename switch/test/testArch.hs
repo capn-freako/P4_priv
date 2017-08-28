@@ -25,15 +25,15 @@ main = sequence_
     Testing utilities
 --------------------------------------------------------------------}
 
-testP4 :: String ->                      -- test name
-          ( String ->                      -- test name
-            Maybe ([Pkt], SwitchState) ->  -- optional validation reference
-            ([Maybe Pkt], SwitchState) ->  -- processed packets & final switch state
+testP4 :: String ->                        -- test name
+          ( String ->                        -- test name
+            Maybe ([[Pkt]], SwitchState) ->  -- optional validation reference
+            ([[Pkt]], SwitchState) ->        -- processed packets & final switch state
             IO ()
-          ) ->                           -- reporting/validation function
-          Maybe ([Pkt], SwitchState) ->  -- optional validation reference
-          P4Arch ->                      -- DUT
-          [Pkt] -> SwitchState ->        -- test packets & initial switch state
+          ) ->                             -- reporting/validation function
+          Maybe ([[Pkt]], SwitchState) ->  -- optional validation reference
+          P4Arch ->                        -- DUT
+          [[Pkt]] -> SwitchState ->        -- test packets & initial switch state
           IO ()
 testP4 nm rprt ref dut pkts st = rprt nm ref $ runP4 dut pkts st
 
@@ -54,8 +54,8 @@ dummyRprt nm _ _ = do
 
 simpleRprt nm _ (outPkts, outState) =
   do putStrLn $ "Testing " ++ nm ++ "..."
-     putStrLn $ "Output packets (" ++ show (length outPkts) ++ "):"
-     _ <- mapM print outPkts
+     putStrLn $ "Output packets (" ++ show (length $ concat outPkts) ++ "):"
+     _ <- mapM print $ concat outPkts
      putStrLn "Final switch state:"
      print outState
 
@@ -112,19 +112,23 @@ tblRemap83 = mkTable
   )
 
 -- Example packet lists (input & reference).
-simplePkts = map mkPkt
+simplePkts = (map . map) mkPkt
   --  inP    srcAd     dstAd      eT       pyldSz
-  [ (  1,       81,       82,     IP,          10 )
-  , (  2,       82,       81,    NMB,          10 )
-  , (  2,       82,       81,    NMB,           0 )
-  , (  2,       82,       81,    NMB,           0 )
-  , (  2,       82,       81,    NMB,           0 )
+  [ [ (  1,       81,       82,     IP,          10 )
+    , (  2,       82,       81,    NMB,          10 )
+    ]
+  , [], [], [], [], [], []
+  -- , [ (  2,       82,       81,    NMB,           0 )
+  --   , (  2,       82,       81,    NMB,           0 )
+  --   , (  2,       82,       81,    NMB,           0 )
+  --   ]
   ]
 
-refPkts = map mkRefPkt2
+refPkts = (map . map) mkRefPkt2
   --  inP    outP  vlanID dropped  inTime outTime           srcAd           dstAd      eT  pyldSz
-  [ (   1,      0,      0,  False,      0,      0,             82,             83,     IP,     10 )
-  , (   2,      1,      0,   True,      0,      0,             83,             82,    NMB,     10 )
+  [ [ (   1,      0,      0,  False,      0,      0,             82,             83,     IP,     10 )
+    , (   2,      1,      0,   True,      0,      0,             83,             82,    NMB,     10 )
+    ]
   ]
 
 -- Example reference final switch state definition.
